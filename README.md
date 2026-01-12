@@ -8,6 +8,21 @@ The project consisted of a simulation (not included in publication) and the anal
 
 # Abstract
 
+## Background
+
+Genetic liability of depressive disorder can be captured by psychopathology in relatives (family history). Various methods summarize family history in a single score, differing in included information as well as underlying model.  We systematically compared the performance of family history indicators, including promising new indicators based on the liability threshold model, in predicting depressive disorder. 
+
+## Methods 
+
+We calculated selected family history indicators for depression (dichotomous, proportion, novel genetically-informed method PAFGRS) in 1339 participants of the Netherlands Study of Depression and Anxiety (Ncase= 1086). Polygenic scores were computed from the most recent GWAS for major depression. We assessed correlations between genetic liability indicators, as well as their prediction of lifetime depressive disorder diagnosis. 
+
+## Results 
+
+Correlations of family history indicators with each other were high (r = 0.71 - 0.99), and much lower with the PGS (r = 0.15). There was a suggested increase in predictive accuracy for more elaborately computed scores, ranging from proportion (AUC = 0.66, OR = 2.26, 95%CI = 1.88-2.71) to PAFGRS (AUC = 0.70, OR =17.06, 95%CI = 9.46 - 30.77).  The best-performing family history indicator and the PGS were independently associated with depressive disorder (PAFGRS: OR = 15.17, 95%CI = 8.36-27.51, p = 3.59x10-19; PGS: OR = 1.30, 95%CI = 1.12-1.50, p = 0.0004). 
+
+## Conclusions 
+
+Our analysis shows that more elaborate family history indicators, including family size, prevalence, heritability and based on genetic theory, would be preferrable over simpler methods. Family history and PGS were complementary in prediction, showing the added value of including both in future studies. 
 
 # Scripts
 
