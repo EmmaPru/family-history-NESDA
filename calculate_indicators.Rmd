@@ -1,0 +1,323 @@
+---
+title: "FH indicators DEP/ANX"
+output: html_document
+date: "2024-07-02"
+---
+
+This script contains:
+- calculation of the prevalence of depression in cases and controls for simple and elaborate coding
+- preparation of dataframes for indicator calculation
+- calculation of the FH indicators for DEP, and DEP+ANX
+- preparation of file with pident, PRS and FH indicators
+- generation of descriptives of the final sample (FTI and PRS available)
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+setwd("LT-FH")
+getwd()
+# Clear workspace
+rm(list = ls())
+
+# Setup - packages and functions
+source(file = "Scripts/indicator_functions.R")
+
+# NESDA which participants are related
+NESDA_related <- read.csv(here("Data", "joint_fam_work_R2.csv"))
+# NESDA PRS with pident added by data management
+PRS <- read_sav(file = here("Data", "DAP2406_PRS_pident.sav"))
+# NESDA lifetime diagnoses (with controls cleaned for bipolar and anxiety)
+index_diagnoses <- read.csv(here("Data", "NESDA_lifetime_depression_cleaned.csv"))
+# read fti data
+FTI_famsize <- read.csv(here("Data", "FTI_famsize.csv"))
+FTI_age <- read.csv(here("Data", "FTI_age.csv"))
+FTI_diagnoses <- read.csv(here("Data", "FTI_diagnoses.csv"))
+```
+
+# Data prep
+
+```{r }
+# Get relevant columns from FTI data
+FH_full <- FTI_diagnoses |>
+    dplyr::select(pident, fammember, starts_with("depdiag"), starts_with("anxdiag")) |>
+    pivot_wider(
+        id_cols = c(pident),
+        names_from = fammember,
+        values_from = c(depdiag_simple:anxdiag_2020paper)
+    )
+
+# Merge index diagnoses with FTI diagnoses
+# remove those with missing DEP_index
+index_diagnoses <- index_diagnoses |>
+    rename("DEP_index" = "caseDEP") |>
+    filter(!is.na(DEP_index))
+
+FH <- index_diagnoses[c("pident", "DEP_index")] |>
+    inner_join(FH_full, by = "pident")
+dim(FH)
+
+# Final sample pidents to align all parameters
+current_sample <- FH$pident
+
+# Set index disorder
+index_disorder <- "DEP"
+
+# Prepare sex and age data
+# Sex is derived from recorded type of family member (mother vs. father, brother vs. sister)
+total_rows <- length(current_sample)
+sex_df <- as.data.frame(cbind(
+    mo = rep("F", total_rows),
+    fa = rep("M", total_rows),
+    br1 = rep("M", total_rows),
+    si1 = rep("F", total_rows),
+    br2 = rep("M", total_rows),
+    si2 = rep("F", total_rows),
+    br3 = rep("M", total_rows),
+    si3 = rep("F", total_rows),
+    br4 = rep("M", total_rows),
+    si4 = rep("F", total_rows),
+    si5 = rep("F", total_rows),
+    si6 = rep("F", total_rows),
+    br5 = rep("M", total_rows),
+    br6 = rep("M", total_rows),
+    br7 = rep("M", total_rows),
+    br8 = rep("M", total_rows),
+    br9 = rep("M", total_rows),
+    si7 = rep("F", total_rows),
+    si8 = rep("F", total_rows),
+    si9 = rep("F", total_rows),
+    si10 = rep("F", total_rows)
+))
+
+# Age was calculated in FTI_preprocessing, here just adapt dataframe
+age_df <- FTI_age |>
+    pivot_wider(
+        id_cols = c(pident),
+        names_from = c(fammember),
+        values_from = c(age)
+    ) |>
+    filter(pident %in% current_sample) |> # make sure only the correct pidents are used. order should remain the same.
+    dplyr::select(-pident)
+dim(age_df)
+# Changing 0s to 1s because PAFGRSplus cannot handle zeros
+age_df[!is.na(age_df) & age_df == 0] # 43 zeros.
+age_df[!is.na(age_df) & age_df == 1] # 8 ones
+# Confusion fix: Replace zeros with NA
+age_df[age_df == 0] <- 1 # replace zeros with ones, resulting in 51 ones
+age_df[!is.na(age_df) & age_df == 0]
+
+famsize <- FTI_famsize |>
+    mutate(famsize = sib_nr + 2) |>
+    filter(pident %in% current_sample) |> # make sure only the correct pidents are used. order should remain the same.
+    dplyr::select(famsize)
+famsize <- as.vector(famsize$famsize)
+length(famsize)
+```
+
+
+
+# Create list of dataframes (one dataframe per by type of diagnostic data)
+```{r}
+# Here we fill the list FTI_data in an orderly manner. The process is messy but the resulting list works.
+# Initiate empty list to store separated dataframes
+FTI_data <- list()
+
+# Family diagnosis data, elaborate coding
+FTI_data[["DEP_elaborate"]] <- FH |>
+    dplyr::select(starts_with("depdiag_elaborate") & !contains("0imputed")) |> # not yet flipped! choice of diagnostic coding
+    rename_with(~ gsub("depdiag_elaborate", "DEP", .x), .cols = everything()) |>
+    # remove columns of br8 and br9 as they are all NA
+    mutate(DEP_br8 = NULL, DEP_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_elaborate"]]) <- sapply(colnames(FTI_data[["DEP_elaborate"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Family diagnosis data, simple coding
+FTI_data[["DEP_simple"]] <- FH |>
+    dplyr::select(starts_with("depdiag_simple") & !contains("0imputed")) |> # not yet flipped! choice of diagnostic coding
+    rename_with(~ gsub("depdiag_simple", "DEP", .x), .cols = everything()) |>
+    # remove columns of br8 and br9 as they are all NA
+    mutate(DEP_br8 = NULL, DEP_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_simple"]]) <- sapply(colnames(FTI_data[["DEP_simple"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Family diagnosis data, elaborate coding, zero imputed
+FTI_data[["DEP_elaborate_0imputed"]] <- FH |>
+    dplyr::select(starts_with("depdiag_elaborate_0imputed")) |> # not yet flipped! choice of diagnostic coding
+    rename_with(~ gsub("depdiag_elaborate_0imputed", "DEP", .x), .cols = everything()) |>
+    # remove columns of br8 and br9 as they are all NA
+    mutate(DEP_br8 = NULL, DEP_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_elaborate_0imputed"]]) <- sapply(colnames(FTI_data[["DEP_elaborate_0imputed"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Family diagnosis data, simple coding, zero imputed
+FTI_data[["DEP_simple_0imputed"]] <- FH |>
+    dplyr::select(starts_with("depdiag_simple_0imputed")) |> # not yet flipped! choice of diagnostic coding
+    rename_with(~ gsub("depdiag_simple_0imputed", "DEP", .x), .cols = everything()) |>
+    # remove columns of br8 and br9 as they are all NA
+    mutate(DEP_br8 = NULL, DEP_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_simple_0imputed"]]) <- sapply(colnames(FTI_data[["DEP_simple_0imputed"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Family diagnosis data, 2020 paper coding
+FTI_data[["DEP_2020paper"]] <- FH |>
+    dplyr::select(starts_with("depdiag_2020paper")) |> # not yet flipped! choice of diagnostic coding
+    rename_with(~ gsub("depdiag_2020paper", "DEP", .x), .cols = everything()) |>
+    # remove columns of br8 and br9 as they are all NA
+    mutate(DEP_br8 = NULL, DEP_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_2020paper"]]) <- sapply(colnames(FTI_data[["DEP_2020paper"]]), flip_colnames) # flip column names around _ to match FH functions
+
+
+# Family diagnosis data, elaborate coding
+FTI_data[["DEP_elaborate_with_ANX_elaborate"]] <- FH |>
+    dplyr::select(
+        starts_with("depdiag_elaborate") & !contains("0imputed"),
+        starts_with("anxdiag_elaborate") & !contains("0imputed")
+    ) |> # not yet flipped! choice of diagnostic coding
+    rename_with(~ gsub("depdiag_elaborate", "DEP", .x), .cols = everything()) |>
+    rename_with(~ gsub("anxdiag_elaborate", "ANX", .x), .cols = everything()) |>
+    # remove columns of br8 and br9 as they are all NA
+    mutate(DEP_br8 = NULL, DEP_br9 = NULL, ANX_br8 = NULL, ANX_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_elaborate_with_ANX_elaborate"]]) <- sapply(colnames(FTI_data[["DEP_elaborate_with_ANX_elaborate"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Family diagnosis data, simple coding
+FTI_data[["DEP_simple_with_ANX_simple"]] <- FH |>
+    dplyr::select(
+        starts_with("depdiag_simple") & !contains("0imputed"),
+        starts_with("anxdiag_simple") & !contains("0imputed")
+    ) |> # not yet flipped! choice of diagnostic coding
+    rename_with(~ gsub("depdiag_simple", "DEP", .x), .cols = everything()) |>
+    rename_with(~ gsub("anxdiag_simple", "ANX", .x), .cols = everything()) |>
+    # remove columns of br8 and br9 as they are all NA
+    mutate(DEP_br8 = NULL, DEP_br9 = NULL, ANX_br8 = NULL, ANX_br9 = NULL)
+
+# Rename columns
+colnames(FTI_data[["DEP_simple_with_ANX_simple"]]) <- sapply(colnames(FTI_data[["DEP_simple_with_ANX_simple"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Check
+lapply(FTI_data, head)
+```
+
+
+# Calculate FH indicators
+```{r }
+indicators <- list()
+indicators_with_index <- list()
+
+# One loop for indicators based on family history of depression only
+for (type in types) {
+    indicators[[type]] <- score_FH(FTI_data[[type]],
+        methods = c("plusminus", "proportion", "PAFGRS", "PAFGRSplus", "FLS"),
+        family_sizes = famsize, sexes = sex_df, ages = age_df,
+        disorders = c("DEP"), index_disorder = "DEP", disorder_FLS = "DEP",
+        Ks = Ks["DEP"], h2ls = h2ls["DEP"], rgs = rg_DEP.ANX,
+        threshold_list = disorder_thresholds, K_relative = K_relative, K_sporadic = K_sporadic,
+        AO_lower = AO_lower, AO_upper = AO_upper
+    )
+    # for certain plots, add index individual's diagnostic status
+    indicators_with_index[[type]] <- cbind(FH["DEP_index"], indicators[[type]])
+}
+
+# One loop for indicators based on family history of depression and anxiety, items added to same list as above
+for (type in types_ANX) {
+    indicators[[type]] <- score_FH(FTI_data[[type]],
+        methods = c("plusminus", "proportion", "PAFGRS", "PAFGRSplus", "FLS"),
+        family_sizes = famsize, sexes = sex_df, ages = age_df,
+        disorders = c("DEP", "ANX"), index_disorder = "DEP", disorder_FLS = "DEP.ANX",
+        Ks = Ks[c("DEP", "ANX")], h2ls = h2ls[c("DEP", "ANX")], rgs = rg_DEP.ANX,
+        threshold_list = disorder_thresholds, K_relative = K_relative, K_sporadic = K_sporadic,
+        AO_lower = AO_lower, AO_upper = AO_upper
+    )
+    # for certain plots, add index individual's diagnostic status
+    indicators_with_index[[type]] <- cbind(FH["DEP_index"], indicators[[type]])
+}
+
+# Check proportion indicator
+check <- indicators_with_index[["DEP_simple"]] |>
+    select(proportion)
+table(check$proportion, useNA = "ifany")
+hist(check$proportion)
+```
+
+
+
+# Prep file with pident and PRS. 
+Exclusion steps:
+- Exclude relatives with PRS missing
+- Exclude one index individual per related pair (known siblings in NESDA)
+
+```{r}
+# Format PRS df
+# This is only data for genotyped individuals, so naturally there are no NAs
+PRS <- PRS |>
+    dplyr::select(pident, SCORE1_SUM) |>
+    mutate(PRS = c(scale(SCORE1_SUM)), .keep = "unused")
+
+# Add pident to indicators_with_index and merge with PRS
+indicators_PRS_index <- list()
+for (type in all_types) {
+    add_pident <- indicators_with_index[[type]] |>
+        mutate(pident = FH$pident) |>
+        mutate(coding = type)
+    # Merge with PRS. The default is an inner join, where only matching pidents are maintained.
+    indicators_PRS_index[[type]] <- merge(
+        x = add_pident,
+        y = PRS,
+        by = "pident"
+    )
+}
+
+sapply(indicators_PRS_index, function(x) sum(is.na(x$PRS))) # there should be no NAs
+sapply(indicators_PRS_index, function(x) dim(x)) # resulting in this many individuals
+
+# turn list into dataframe
+# pivot to long format with column 'type' containing plusminus, proportion, PAFGRS, PAFGRSplus, FLS, PRS
+indicators_PRS_index <- do.call(rbind.data.frame, indicators_PRS_index) |>
+    pivot_longer(cols = -c(pident, coding, DEP_index), names_to = "indicator", values_to = "value") |>
+    mutate(indicator = factor(indicator, levels = c("plusminus", "proportion", "FLS", "PAFGRS", "PAFGRSplus", "PRS")))
+
+# Exclude related index individuals
+# Identify individuals based on family relatedness and case-control status
+pident_to_exclude <- indicators_PRS_index |>
+    pivot_wider(
+        names_from = c(coding, indicator),
+        values_from = c(value)
+    ) |>
+    mutate(fam_number = NESDA_related$famnumber.x[match(pident, NESDA_related$pident)]) |>
+    filter(!is.na(fam_number)) |>
+    group_by(fam_number) |>
+    mutate(n = n()) |>
+    filter(n > 1) |>
+    select(pident, DEP_index, fam_number, n) |>
+    arrange(fam_number) |>
+    mutate(exclude = DEP_index == 1 & any(DEP_index == 0)) |>
+    mutate(
+        # If more than one row is not excluded, randomly exclude all but one
+        extra_exclude = if (sum(!exclude) > 1) {
+            temp <- which(!exclude)
+            to_exclude <- sample(temp, length(temp) - 1)
+            seq_along(exclude) %in% to_exclude
+        } else {
+            FALSE
+        }
+    ) |>
+    mutate(final_exclude = exclude | extra_exclude)
+
+# Sanity check: comparison with those excluded in acylcarnitines project
+### hidden in public version ###
+
+# Exclude these individuals from indicators_PRS_index
+indicators_PRS_index <- indicators_PRS_index |>
+    filter(!(pident %in% pident_to_exclude$pident[pident_to_exclude$final_exclude]))
+```
+
+# Save
+
+```{r}
+# Save
+save(FH, file = here("Int_results", "FH.RData"))
+save(indicators_PRS_index, file = here("Int_results", "indicators_PRS_index.RData"))
+save(indicators_with_index, file = here("Int_results", "indicators_with_index.RData"))
+```

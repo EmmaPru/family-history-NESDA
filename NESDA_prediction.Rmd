@@ -1,0 +1,350 @@
+---
+title: "Prediction of Depression and Anxiety by FH"
+output: html_document
+date: "2024-07-02"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+# Setup - packages and functions
+source(file = "Scripts/indicator_functions.R")
+
+# Function to flip the column names # From ChatGPT
+flip_colnames <- function(name) {
+  parts <- str_split(name, "_", simplify = TRUE)
+  if (length(parts) == 2) {
+    return(paste(parts[2], parts[1], sep = "_"))
+  }
+  return(name)
+}
+```
+
+```{r }
+load(file = here("Results", "NESDA_FH_indicators_only.RData")) # indicators (list)
+load(file = here("Results", "NESDA_FH_indicators.RData")) # indicators_with_index (list)
+
+load(file = here("Results", "NESDA_FH_indicators_with_ANX.RData")) # indicators_ANX (data.frame)
+
+# Types of diagnostic data
+types <- c("DEP_elaborate", "DEP_simple", "DEP_elaborate_0imputed", "DEP_simple_0imputed", "DEP_2020paper")
+```
+
+# Data prep
+
+```{r }
+# read fti data
+FTI_famsize <- read.csv(here("Data", "FTI_famsize.csv"))
+FTI_age <- read.csv(here("Data", "FTI_age.csv"))
+FTI_diagnoses <- read.csv(here("Data", "FTI_diagnoses.csv"))
+
+FH_full <- FTI_diagnoses |>
+  select(pident | fammember | starts_with("depdiag") | starts_with("anxdiag")) |>
+  pivot_wider(
+    id_cols = c(pident),
+    names_from = fammember,
+    values_from = c(depdiag_simple:anxdiag_2020paper)
+  )
+
+# read index/participant diagnosis data and adapt formatting
+index_diagnoses <- read.csv(here("Data", "NESDA_lifetime_diagnoses.csv"))
+table(index_diagnoses$ever_dep, useNA = "always")
+index_diagnoses <- index_diagnoses |>
+  rename("DEP_index" = "ever_dep")
+
+FH <- index_diagnoses[c("pident", "DEP_index")] |>
+  inner_join(FH_full, by = "pident")
+ppt_num <- dim(FH)[1]
+
+index_disorder <- "DEP"
+
+# Performance assessment parameters
+index_labels <- paste("index", index_disorder, sep = "_")
+K <- Ks[index_disorder]
+assessment <- list()
+viz <- list()
+
+# Prepare other info dfs
+sex_df <- as.data.frame(cbind(
+  mo = rep("F", nrow(FH_full)),
+  fa = rep("M", nrow(FH_full)),
+  br1 = rep("M", nrow(FH_full)),
+  si1 = rep("F", nrow(FH_full)),
+  br2 = rep("M", nrow(FH_full)),
+  si2 = rep("F", nrow(FH_full)),
+  br3 = rep("M", nrow(FH_full)),
+  si3 = rep("F", nrow(FH_full)),
+  br4 = rep("M", nrow(FH_full)),
+  si4 = rep("F", nrow(FH_full)),
+  si5 = rep("F", nrow(FH_full)),
+  si6 = rep("F", nrow(FH_full)),
+  br5 = rep("M", nrow(FH_full)),
+  br6 = rep("M", nrow(FH_full)),
+  br7 = rep("M", nrow(FH_full)),
+  br8 = rep("M", nrow(FH_full)),
+  br9 = rep("M", nrow(FH_full)),
+  si7 = rep("F", nrow(FH_full)),
+  si8 = rep("F", nrow(FH_full)),
+  si9 = rep("F", nrow(FH_full)),
+  si10 = rep("F", nrow(FH_full))
+))
+
+age_df <- FTI_age |>
+  pivot_wider(
+    id_cols = c(pident),
+    names_from = c(fammember),
+    values_from = c(age)
+  ) |>
+  select(-pident)
+
+# Changing 0s to 1s because PAFGRSplus cannot handle zeros
+age_df[!is.na(age_df) & age_df == 0] # 43 zeros.
+age_df[!is.na(age_df) & age_df == 1] # 8 ones
+# Confusion fix: Replace zeros with NA
+age_df[age_df == 0] <- 1 # replace zeros with ones, resulting in 51 ones
+age_df[!is.na(age_df) & age_df == 0]
+
+famsize <- FTI_famsize |>
+  mutate(famsize = sib_nr + 2) |>
+  select(famsize)
+famsize <- as.vector(famsize$famsize)
+```
+
+
+# Separate by type of diagnostic data
+```{r}	
+FTI_data <- list()
+# Family diagnosis data, elaborate coding
+FTI_data[["DEP_elaborate"]] <- FH |>
+  select(starts_with("depdiag_elaborate") & !contains("0imputed")) |> # not yet flipped! choice of diagnostic coding
+  rename_with(~ gsub("depdiag_elaborate", "DEP", .x), .cols = everything()) |>
+  # remove columns of br8 and br9 as they are all NA
+  mutate(DEP_br8 = NULL, DEP_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_elaborate"]]) <- sapply(colnames(FTI_data[["DEP_elaborate"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Family diagnosis data, simple coding
+FTI_data[["DEP_simple"]] <- FH |>
+  select(starts_with("depdiag_simple") & !contains("0imputed")) |> # not yet flipped! choice of diagnostic coding
+  rename_with(~ gsub("depdiag_simple", "DEP", .x), .cols = everything()) |>
+  # remove columns of br8 and br9 as they are all NA
+  mutate(DEP_br8 = NULL, DEP_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_simple"]]) <- sapply(colnames(FTI_data[["DEP_simple"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Family diagnosis data, elaborate coding, zero imputed
+FTI_data[["DEP_elaborate_0imputed"]] <- FH |>
+  select(starts_with("depdiag_elaborate_0imputed")) |> # not yet flipped! choice of diagnostic coding
+  rename_with(~ gsub("depdiag_elaborate_0imputed", "DEP", .x), .cols = everything()) |>
+  # remove columns of br8 and br9 as they are all NA
+  mutate(DEP_br8 = NULL, DEP_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_elaborate_0imputed"]]) <- sapply(colnames(FTI_data[["DEP_elaborate_0imputed"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Family diagnosis data, simple coding, zero imputed
+FTI_data[["DEP_simple_0imputed"]] <- FH |>
+  select(starts_with("depdiag_simple_0imputed")) |> # not yet flipped! choice of diagnostic coding
+  rename_with(~ gsub("depdiag_simple_0imputed", "DEP", .x), .cols = everything()) |>
+  # remove columns of br8 and br9 as they are all NA
+  mutate(DEP_br8 = NULL, DEP_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_simple_0imputed"]]) <- sapply(colnames(FTI_data[["DEP_simple_0imputed"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Family diagnosis data, 2020 paper coding
+FTI_data[["DEP_2020paper"]] <- FH |>
+  select(starts_with("depdiag_2020paper")) |> # not yet flipped! choice of diagnostic coding
+  rename_with(~ gsub("depdiag_2020paper", "DEP", .x), .cols = everything()) |>
+  # remove columns of br8 and br9 as they are all NA
+  mutate(DEP_br8 = NULL, DEP_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_2020paper"]]) <- sapply(colnames(FTI_data[["DEP_2020paper"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# Check
+lapply(FTI_data, head)
+```
+
+
+# Calculate FH indicators
+```{r }
+indicators <- list()
+indicators_with_index <- list()
+
+for (type in types) {
+  indicators[[type]] <- score_FH(FTI_data[[type]],
+    methods = c("plusminus", "proportion", "PAFGRS", "PAFGRSplus", "FLS"),
+    family_sizes = famsize, sexes = sex_df, ages = age_df,
+    disorders = c("DEP"), index_disorder = "DEP", disorder_FLS = "DEP",
+    Ks = Ks["DEP"], h2ls = h2ls["DEP"], rgs = rg_DEP.ANX,
+    threshold_list = disorder_thresholds, K_relative = K_relative, K_sporadic = K_sporadic,
+    AO_lower = AO_lower, AO_upper = AO_upper
+  )
+  # for certain plots, add index individual's diagnostic status
+  indicators_with_index[[type]] <- cbind(FH["DEP_index"], indicators[[type]])
+}
+
+lapply(indicators, head)
+lapply(indicators_with_index, head)
+# Save
+
+# save(indicators, file = here("Results", "NESDA_FH_indicators_only.RData"))
+load(file = here("Results", "NESDA_FH_indicators_only.RData"))
+# save(indicators_with_index, file = here("Results", "NESDA_FH_indicators.RData"))
+load(file = here("Results", "NESDA_FH_indicators.RData"))
+
+
+# indicators <- list()
+# Remove the column with index status from each element in indicators_with_index
+# for (type in types) {
+# indicators[[type]] <- indicators_with_index[[type]] |>
+#  select(-DEP_index)
+# }
+
+assessment <- list()
+for (type in types) {
+  indicators_df <- indicators[[type]]
+  indicators_with_index_df <- indicators_with_index[[type]]
+  # Assess performance for all 5 indicators in predicting depression
+  assessment[[type]] <- apply(indicators_df, 2, function(x) {
+    assess_performance_dichot(
+      true_status = as.numeric(indicators_with_index_df[, "DEP_index"]), predictor = x, K
+    )
+  })
+}
+save(assessment, file = here("Results", "NESDA_prediction_assessment.RData"))
+load(file = here("Results", "NESDA_DEP_prediction_accuracy.RData"))
+```
+
+
+# With helper - Test 
+```{r}
+# Family diagnosis data, elaborate coding
+FTI_data[["DEP_elaborate_with_ANX_elaborate"]] <- FH |>
+  select(
+    starts_with("depdiag_elaborate") & !contains("0imputed"),
+    starts_with("anxdiag_elaborate") & !contains("0imputed")
+  ) |> # not yet flipped! choice of diagnostic coding
+  rename_with(~ gsub("depdiag_elaborate", "DEP", .x), .cols = everything()) |>
+  rename_with(~ gsub("anxdiag_elaborate", "ANX", .x), .cols = everything()) |>
+  # remove columns of br8 and br9 as they are all NA
+  mutate(DEP_br8 = NULL, DEP_br9 = NULL, ANX_br8 = NULL, ANX_br9 = NULL)
+# Rename columns
+colnames(FTI_data[["DEP_elaborate_with_ANX_elaborate"]]) <- sapply(colnames(FTI_data[["DEP_elaborate_with_ANX_elaborate"]]), flip_colnames) # flip column names around _ to match FH functions
+
+# check if there are any columns with nas only
+head(FTI_data[["DEP_elaborate_with_ANX_elaborate"]])
+
+indicators_ANX <- score_FH(
+  FH = FTI_data[["DEP_elaborate_with_ANX_elaborate"]],
+  methods = c("plusminus", "proportion", "FLS", "PAFGRS", "PAFGRSplus"),
+  family_sizes = famsize, sexes = sex_df, ages = age_df,
+  disorders = c("DEP", "ANX"), index_disorder = "DEP", disorder_FLS = "DEP.ANX",
+  Ks = Ks[c("DEP", "ANX")], h2ls = h2ls[c("DEP", "ANX")], rgs = rg_DEP.ANX,
+  threshold_list = disorder_thresholds, K_relative = K_relative, K_sporadic = K_sporadic,
+  AO_lower = AO_lower, AO_upper = AO_upper
+)
+head(indicators_ANX)
+
+indicators_ANX <- cbind(FH["DEP_index"], indicators_ANX)
+
+
+# save(indicators_ANX, file = here("Results", "NESDA_FH_indicators_with_ANX.RData"))
+```
+
+
+# Assorted 7 Nov - Prevalences for all codings
+idk what is this messy code
+
+```{r }
+load(file = here("Results", "prevalences_dep.RData"))
+prevalences_dep
+
+# FTI diagnosis data with NESDA diagnosis data
+glimpse(FH)
+
+FH_index_case <- FH |>
+  filter(DEP_index == 1) |>
+  select(DEP_index | (starts_with("depdiag_elaborate") & !contains("0imputed"))) |>
+  pivot_longer(cols = depdiag_elaborate_mo:depdiag_elaborate_si10, names_to = "fam_member", values_to = "dep_diag")
+glimpse(FH_index_case)
+
+sum(FH_index_case$dep_diag, na.rm = TRUE) / sum(!is.na(FH_index_case$dep_diag))
+
+FH_index_control <- FH |>
+  filter(DEP_index == 0) |>
+  select(DEP_index | (starts_with("depdiag_elaborate") & !contains("0imputed"))) |>
+  pivot_longer(cols = depdiag_elaborate_mo:depdiag_elaborate_si10, names_to = "fam_member", values_to = "dep_diag")
+glimpse(FH_index_control)
+
+
+FH_index_case_simple <- FH |>
+  filter(DEP_index == 1) |>
+  select(DEP_index | (starts_with("depdiag_simple") & !contains("0imputed"))) |>
+  pivot_longer(cols = depdiag_simple_mo:depdiag_simple_si10, names_to = "fam_member", values_to = "dep_diag")
+glimpse(FH_index_case)
+
+sum(FH_index_case_simple$dep_diag, na.rm = TRUE) / sum(!is.na(FH_index_case_simple$dep_diag))
+
+FH_index_control_simple <- FH |>
+  filter(DEP_index == 0) |>
+  select(DEP_index | (starts_with("depdiag_simple") & !contains("0imputed"))) |>
+  pivot_longer(cols = depdiag_simple_mo:depdiag_simple_si10, names_to = "fam_member", values_to = "dep_diag")
+glimpse(FH_index_control)
+
+sum(FH_index_control_simple$dep_diag, na.rm = TRUE) / sum(!is.na(FH_index_control_simple$dep_diag))
+
+elab <- c(
+  sum(FH_index_control$dep_diag, na.rm = TRUE) / sum(!is.na(FH_index_control$dep_diag)),
+  sum(FH_index_case$dep_diag, na.rm = TRUE) / sum(!is.na(FH_index_case$dep_diag))
+)
+simple <- c(
+  sum(FH_index_control_simple$dep_diag, na.rm = TRUE) / sum(!is.na(FH_index_control_simple$dep_diag)),
+  sum(FH_index_case_simple$dep_diag, na.rm = TRUE) / sum(!is.na(FH_index_case_simple$dep_diag))
+)
+
+prevalences <- as.data.frame(bind_rows(
+  "elaborate" = elab,
+  "simple" = simple
+))
+
+knitr::kable(prevalences,
+  caption = "Prevalences of depression in cases and controls",
+  row.names = c("Controls", "Cases"), row.names = c("Elaborate", "Simple")
+)
+
+# Better:
+# turn FH into long dataframe with one column disorder: dep/anx, one column for type of coding (simple vs. elaborate),
+# one column for imputation (null or 0imputed), one column for family member, one column for diagnosis
+```
+
+
+```{r}
+# double check slope intercept ici
+true_values <- indicators_with_index[["DEP_simple"]]$DEP_index
+predictor <- indicators[["DEP_simple"]][["PAFGRSplus"]]
+model <- lm(true_values ~ predictor)
+summary(model)
+f_ICI(Y = true_values, P = predictor)
+
+# What do we expect?
+# Slope close to 1
+# Intercept close to 0
+# ICI close to 0
+hist(true_values)
+mean(true_values)
+hist(predictor)
+summary(predictor)
+hist(predictor[true_values == 1])
+hist(predictor[true_values == 0])
+```
+
+
+
+```{r}	
+# Read spss file
+library(foreign)
+
+PRS <- read.spss("XXXX/DAP2406_PRS_pident.sav", to.data.frame = TRUE)
+diag <- read.spss("XXXX/N1_A257D.sav", to.data.frame = TRUE)
+head(PRS)
+head(diag)
+```

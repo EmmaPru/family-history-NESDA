@@ -1,0 +1,361 @@
+---
+title: "LT-FH Simu DEP/ANX/BIP/SCZ"
+output: html_document
+date: "2024-04-05"
+---
+
+```{r setup, include=FALSE}
+# Setup - packages and functions
+source(file = "setup.R")
+
+# # Build the family
+# num_sibs <- 2 # number of siblings to simulate
+# parents <- c("f", "m") # mother and father
+# fam_members <- c("index", paste0("sib", sequence(num_sibs)), parents)
+
+# General notes
+# Ks <- c(DEP =  0.19, ANX = 0.2, SCZ = 0.005, BIP = 0.013) # prevalence in Netherlands from NEMESIS-2
+# h2ls <- c(DEP =  0.4, ANX = 0.4, SCZ = 0.77, BIP = 0.67) # twin heritability estimates from Polderman et al.
+rg_SCZ.BIP.DEP.ANX <- matrix(c( # ldsc regression genetic correlation estimates from Grotzinger et al.
+1, 0.682, 0.357, 0.367,
+0.682, 1, 0.343, 0.297,
+0.357, 0.343, 1, 0.867,
+0.367, 0.357, 0.867, 1
+),4,4)
+rownames(rg_SCZ.BIP.DEP.ANX) <- colnames(rg_SCZ.BIP.DEP.ANX) <- c("SCZ", "BIP", "DEP", "ANX")
+
+
+rg_DEP.ANX <- rg_SCZ.BIP.DEP.ANX[c("DEP", "ANX"), c("DEP", "ANX")]
+rg_SCZ.BIP <- rg_SCZ.BIP.DEP.ANX[c("SCZ", "BIP"), c("SCZ", "BIP")]
+rg_DEP.ANX.BIP <- rg_SCZ.BIP.DEP.ANX[c("DEP", "ANX", "BIP"), c("DEP", "ANX", "BIP")]
+
+sim_reps <- 10
+sim_size <- 1e4 # number of simulated persons in one simulation round (for rmvn)
+```
+
+
+## Compare prop & dense prop (predicting depression)
+
+```{r DEP, warning=FALSE}
+sim.input.list <- list(
+# Depression 
+  list(name="DEP, 1 fam member", index_disorder = "DEP", Ks = c(DEP = 0.19), h2ls = c(DEP = 0.4), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1"))
+  ,list(name="DEP, 3 fam members", index_disorder = "DEP", Ks = c(DEP = 0.19), h2ls = c(DEP = 0.4), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "m", "f"))
+  ,list(name="DEP/ANX, 3 fam members", index_disorder = "DEP", Ks = c(DEP = 0.19, ANX = 0.2), h2ls = c(DEP = 0.4, ANX = 0.4), rg = rg_DEP.ANX, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "m", "f"))
+  ,list(name="DEP/ANX/BIP, 3 fam members", index_disorder = "DEP", Ks = c(DEP =  0.19, ANX = 0.2, BIP = 0.013), h2ls = c(DEP =  0.4, ANX = 0.4, BIP = 0.67), rg = rg_DEP.ANX.BIP, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "m", "f"))
+  ,list(name="DEP/ANX/BIP/SCZ, 3 fam members", index_disorder = "DEP", Ks = c(DEP =  0.19, ANX = 0.2, SCZ = 0.005, BIP = 0.013), h2ls = c(DEP =  0.4, ANX = 0.4, SCZ = 0.77, BIP = 0.67), rg = rg_SCZ.BIP.DEP.ANX, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "m", "f"))
+  ,list(name="DEP/ANX/BIP/SCZ, 8 fam members", index_disorder = "DEP", Ks = c(DEP =  0.19, ANX = 0.2, SCZ = 0.005, BIP = 0.013), h2ls = c(DEP =  0.4, ANX = 0.4, SCZ = 0.77, BIP = 0.67), rg = rg_SCZ.BIP.DEP.ANX, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "sib3", "sib4", "sib5", "sib6", "m", "f"))
+)
+
+dep_prediction <- full_sim(sim.input.list = sim.input.list)
+#save(dep_prediction, file = here("Results", "dep_prediction_denseprop.RData"))
+
+means_se <- as.data.frame(do.call("rbind", map(dep_prediction, "outcome_meanse")))
+means_se
+
+plusminus_AUC <- as.data.frame(do.call("rbind",
+lapply(map(dep_prediction, "outcome_meanse"), # all listed dfs
+       function(x) x[,"FH_DEP_lm.status.plusminus_AUC"] ) # extract same column
+))
+plusminus_AUC
+
+proportion_AUC <- as.data.frame(do.call("rbind",
+lapply(map(dep_prediction, "outcome_meanse"), # all listed dfs
+       function(x) x[,"FH_DEP_lm.status.proportion_AUC"] ) # extract same column
+))
+proportion_AUC
+
+denseprop_AUC <- as.data.frame(do.call("rbind",
+lapply(map(dep_prediction, "outcome_meanse"), # all listed dfs
+       function(x) x[,"FH_DEP_lm.status.denseprop_AUC"] ) # extract same column
+))
+denseprop_AUC
+
+ltfh_AUC <- as.data.frame(do.call("rbind",
+lapply(map(dep_prediction, "outcome_meanse"), # all listed dfs
+       function(x) x[,"LTFH_DEP_lm.status.muliab_AUC"] ) # extract same column
+))
+ltfh_AUC
+```
+
+
+```{r denseprop.plot}
+x <- unlist(map(sim.input.list, "name"))
+# Plot R2 by family size for depression
+AUC_plot_denseprop <- ggplot() +
+  # plusminus
+  geom_point(data = plusminus_AUC, aes(x = x, y = mean, color = "FH+-"), position = position_nudge(-.33), size = 3) +
+  geom_errorbar(data = plusminus_AUC, aes(x = x, ymin = mean - se, ymax = mean + se, color = "FH+-"), width = .2, position = position_nudge(-.33)) +
+  # denseprop
+  geom_point(data = denseprop_AUC, aes(x = x, y = mean, color = "Prop Dense"), position = position_nudge(-.11), size = 3) +
+  geom_errorbar(data = denseprop_AUC, aes(x = x, ymin = mean - se, ymax = mean + se, color = "Prop Dense"), width = .2, position = position_nudge(-.11)) +
+  # proportion
+  geom_point(data = proportion_AUC, aes(x = x, y = mean, color = "FH Proportion"), position = position_nudge(.11), size = 3) +
+  geom_errorbar(data = proportion_AUC, aes(x = x, ymin = mean - se, ymax = mean + se, color = "FH Proportion"), width = .2, position = position_nudge(.11)) +
+  # ltfh
+  geom_point(data = ltfh_AUC, aes(x = x, y = mean, color = "LT-FH"), position = position_nudge(.33), size = 3) +
+  geom_errorbar(data = ltfh_AUC, aes(x = x, ymin = mean - se, ymax = mean + se, color = "LT-FH"), width = .2, position = position_nudge(.33)) +
+  
+  scale_color_manual(values = c("FH+-" = "#4B0C6BFF", "Prop Dense" = "#00BFFF", "FH Proportion" = "#CF4446FF", "LT-FH"= "#FB9A06FF"),
+                     labels = c("FH Proportion", "FH+-", "LT-FH", "Prop Dense"),
+                     guide = guide_legend(
+                       title = "Predictor" 
+                     )) +
+  ylim(0.5, 0.7) +
+  ylab("AUC") +
+  xlab("Family") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, size = 12, vjust = 1, hjust = 1),
+        axis.text.y = element_text(size = 12),
+        title = element_text(size = 15),
+        plot.subtitle = element_text(size = 12),
+        legend.text = element_text(size = 12)) +
+  ggtitle("Assessment of Depression Prediction", subtitle = "AUC of true.status & predictor")
+
+AUC_plot_denseprop
+ggsave(here("Results", "AUC_DEP_denseprop.pdf"), AUC_plot_denseprop, width = 20, height = 20, units = "cm")
+```
+
+This is to compare whether proportion of possible diagnoses (here FH Proportion) or proportion of family members affected with _any_ disorder (here Prop Dense) is the better predictor. These two indicators are equivalent when only one disorder is taken into account, but not when multiple diagnoses are considered. Therefore, we specifically plot various diagnostic combinations with disorders relevant for the prediction of depression.
+
+
+## Predicting Schizophrenia
+```{r warning = FALSE}
+sim.input.list <- list(
+# Schizophrenia
+  list(name="SCZ, 1 fam member", index_disorder = "SCZ", Ks = c(SCZ = 0.005), h2ls = c(SCZ = 0.77), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1"))
+  
+  ,list(name="SCZ, 3 fam members", index_disorder = "SCZ", Ks = c(SCZ = 0.005), h2ls = c(SCZ = 0.77), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "m", "f"))
+  
+  ,list(name="SCZ/BIP, 3 fam members", index_disorder = "SCZ", Ks = c(SCZ = 0.005, BIP = 0.013), h2ls = c(SCZ = 0.77, BIP = 0.67), rg = rg_SCZ.BIP, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "m", "f"))
+  
+  ,list(name="SCZ/DEP/ANX/BIP, 3 fam members", index_disorder = "SCZ", Ks = c(DEP =  0.19, ANX = 0.2, SCZ = 0.005, BIP = 0.013), h2ls = c(DEP =  0.4, ANX = 0.4, SCZ = 0.77, BIP = 0.67), rg = rg_SCZ.BIP.DEP.ANX, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "m", "f"))
+  
+  ,list(name="SCZ, 8 fam members", index_disorder = "SCZ", Ks = c(SCZ = 0.005), h2ls = c(SCZ = 0.77), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "sib3", "sib4", "sib5", "sib6", "m", "f"))
+  
+  ,list(name="SCZ/BIP, 8 fam members", index_disorder = "SCZ", Ks = c(SCZ = 0.005, BIP = 0.013), h2ls = c(SCZ = 0.77, BIP = 0.67), rg = rg_SCZ.BIP, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "sib3", "sib4", "sib5", "sib6", "m", "f"))
+  
+  ,list(name="SCZ/DEP/ANX/BIP, 8 fam members", index_disorder = "SCZ", Ks = c(DEP =  0.19, ANX = 0.2, SCZ = 0.005, BIP = 0.013), h2ls = c(DEP =  0.4, ANX = 0.4, SCZ = 0.77, BIP = 0.67), rg = rg_SCZ.BIP.DEP.ANX, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "sib3", "sib4", "sib5", "sib6", "m", "f"))
+)
+
+scz_prediction <- full_sim(sim.input.list = sim.input.list)
+
+save(scz_prediction, file = here("Results", "scz_prediction_output.RData"))
+#load(here("Results", "scz_prediction_output.RData"))
+
+means_se <- as.data.frame(do.call("rbind", map(scz_prediction, "outcome_meanse")))
+means_se
+
+plusminus_AUC <- as.data.frame(do.call("rbind",
+lapply(map(scz_prediction, "outcome_meanse"), # all listed dfs
+       function(x) x[,"FH_SCZ_lm.status.plusminus_AUC"] ) # extract same column
+))
+plusminus_AUC
+
+proportion_AUC <- as.data.frame(do.call("rbind",
+lapply(map(scz_prediction, "outcome_meanse"), # all listed dfs
+       function(x) x[,"FH_SCZ_lm.status.proportion_AUC"] ) # extract same column
+))
+proportion_AUC
+
+# denseprop_AUC <- as.data.frame(do.call("rbind",
+# lapply(map(scz_prediction, "outcome_meanse"), # all listed dfs
+#        function(x) x[,"FH_SCZ_lm.status.denseprop_AUC"] ) # extract same column
+# ))
+# denseprop_AUC
+
+ltfh_AUC <- as.data.frame(do.call("rbind",
+lapply(map(scz_prediction, "outcome_meanse"), # all listed dfs
+       function(x) x[,"LTFH_SCZ_lm.status.muliab_AUC"] ) # extract same column
+))
+ltfh_AUC
+```
+
+
+```{r}
+# Plot R2 by disorder number for depression
+x <- unlist(map(sim.input.list, "name"))
+# Plot R2 by family size for depression
+AUC_plot_SCZ <- ggplot() +
+  # plusminus
+  geom_point(data = plusminus_AUC, aes(x = x, y = mean, color = "FH+-"), position = position_nudge(-.22), size = 3) +
+  geom_errorbar(data = plusminus_AUC, aes(x = x, ymin = mean - se, ymax = mean + se, color = "FH+-"), width = .2, position = position_nudge(-.22)) +
+  # proportion
+  geom_point(data = proportion_AUC, aes(x = x, y = mean, color = "FH Proportion"), position = position_nudge(0), size = 3) +
+  geom_errorbar(data = proportion_AUC, aes(x = x, ymin = mean - se, ymax = mean + se, color = "FH Proportion"), width = .2, position = position_nudge(0)) +
+  # ltfh
+  geom_point(data = ltfh_AUC, aes(x = x, y = mean, color = "LT-FH"), position = position_nudge(.22), size = 3) +
+  geom_errorbar(data = ltfh_AUC, aes(x = x, ymin = mean - se, ymax = mean + se, color = "LT-FH"), width = .2, position = position_nudge(.22)) +
+  
+  scale_color_manual(values = c("FH+-" = "#4B0C6BFF", "FH Proportion" = "#CF4446FF", "LT-FH"= "#FB9A06FF"),
+                     labels = c( "FH Proportion", "FH +-", "LT-FH"),
+                     guide = guide_legend(
+                       title = "Predictor"
+                     )) +
+  ylim(0.5, 0.8) +
+  ylab("AUC") +
+  xlab("Family") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, size = 12, vjust = 1, hjust = 1),
+        axis.text.y = element_text(size = 12),
+        title = element_text(size = 15),
+        plot.subtitle = element_text(size = 12),
+        legend.text = element_text(size = 12)) +
+  ggtitle("Assessment of Schizophrenia Prediction", subtitle = "AUC of true.status & predictor")
+
+AUC_plot_SCZ
+ggsave(here("Results", "AUC_SCZ.pdf"), AUC_plot_SCZ, width = 20, height = 20, units = "cm")
+```
+
+
+
+
+## Predicting Bipolar
+```{r warning = FALSE}
+sim.input.list <- list(
+# Bipolar disorder
+  list(name="BIP, 1 fam member", index_disorder = "BIP", Ks = c(BIP = 0.013), h2ls = c(BIP = 0.67), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1"))
+  
+  ,list(name="BIP, 3 fam members", index_disorder = "BIP", Ks = c(BIP = 0.013), h2ls = c(BIP = 0.67), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "m", "f"))
+  
+  ,list(name="BIP/SCZ, 3 fam members", index_disorder = "BIP", Ks = c(SCZ = 0.005, BIP = 0.013), h2ls = c(SCZ = 0.77, BIP = 0.67), rg = rg_SCZ.BIP, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "m", "f"))
+  
+  ,list(name="BIP/DEP/ANX/SCZ, 3 fam members", index_disorder = "BIP", Ks = c(DEP =  0.19, ANX = 0.2, SCZ = 0.005, BIP = 0.013), h2ls = c(DEP =  0.4, ANX = 0.4, SCZ = 0.77, BIP = 0.67), rg = rg_SCZ.BIP.DEP.ANX, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "m", "f"))
+  
+  ,list(name="BIP, 8 fam members", index_disorder = "BIP", Ks = c(BIP = 0.013), h2ls = c(BIP = 0.67), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "sib3", "sib4", "sib5", "sib6", "m", "f"))
+  
+  ,list(name="BIP/SCZ, 8 fam members", index_disorder = "BIP", Ks = c(SCZ = 0.005, BIP = 0.013), h2ls = c(SCZ = 0.77, BIP = 0.67), rg = rg_SCZ.BIP, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "sib3", "sib4", "sib5", "sib6", "m", "f"))
+  
+  ,list(name="BIP/DEP/ANX/SCZ, 8 fam members", index_disorder = "BIP", Ks = c(DEP =  0.19, ANX = 0.2, SCZ = 0.005, BIP = 0.013), h2ls = c(DEP =  0.4, ANX = 0.4, SCZ = 0.77, BIP = 0.67), rg = rg_SCZ.BIP.DEP.ANX, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "sib3", "sib4", "sib5", "sib6", "m", "f"))
+)
+
+bip_prediction <- full_sim(sim.input.list = sim.input.list)
+
+save(bip_prediction, file = here("Results", "bip_prediction_output.RData"))
+#load(here("Results", "bip_prediction_output.RData"))
+
+means_se <- as.data.frame(do.call("rbind", map(bip_prediction, "outcome_meanse")))
+means_se
+
+plusminus_AUC <- as.data.frame(do.call("rbind",
+lapply(map(bip_prediction, "outcome_meanse"), # all listed dfs
+       function(x) x[,"FH_BIP_lm.status.plusminus_AUC"] ) # extract same column
+))
+plusminus_AUC
+
+proportion_AUC <- as.data.frame(do.call("rbind",
+lapply(map(bip_prediction, "outcome_meanse"), # all listed dfs
+       function(x) x[,"FH_BIP_lm.status.proportion_AUC"] ) # extract same column
+))
+proportion_AUC
+
+# denseprop_AUC <- as.data.frame(do.call("rbind",
+# lapply(map(bip_prediction, "outcome_meanse"), # all listed dfs
+#        function(x) x[,"FH_BIP_lm.status.denseprop_AUC"] ) # extract same column
+# ))
+# denseprop_AUC
+
+ltfh_AUC <- as.data.frame(do.call("rbind",
+lapply(map(bip_prediction, "outcome_meanse"), # all listed dfs
+       function(x) x[,"LTFH_BIP_lm.status.muliab_AUC"] ) # extract same column
+))
+ltfh_AUC
+```
+
+
+```{r}
+# Plot AUC for bipolar
+x <- unlist(map(sim.input.list, "name"))
+# Plot R2 by family size for depression
+AUC_plot_BIP <- ggplot() +
+  # plusminus
+  geom_point(data = plusminus_AUC, aes(x = x, y = mean, color = "FH+-"), position = position_nudge(-.22), size = 3) +
+  geom_errorbar(data = plusminus_AUC, aes(x = x, ymin = mean - se, ymax = mean + se, color = "FH+-"), width = .2, position = position_nudge(-.22)) +
+  # proportion
+  geom_point(data = proportion_AUC, aes(x = x, y = mean, color = "FH Proportion"), position = position_nudge(0), size = 3) +
+  geom_errorbar(data = proportion_AUC, aes(x = x, ymin = mean - se, ymax = mean + se, color = "FH Proportion"), width = .2, position = position_nudge(0)) +
+  # ltfh
+  geom_point(data = ltfh_AUC, aes(x = x, y = mean, color = "LT-FH"), position = position_nudge(.22), size = 3) +
+  geom_errorbar(data = ltfh_AUC, aes(x = x, ymin = mean - se, ymax = mean + se, color = "LT-FH"), width = .2, position = position_nudge(.22)) +
+  
+  scale_color_manual(values = c("FH+-" = "#4B0C6BFF", "FH Proportion" = "#CF4446FF", "LT-FH"= "#FB9A06FF"),
+                     labels = c( "FH Proportion", "FH +-", "LT-FH"),
+                     guide = guide_legend(
+                       title = "Predictor"
+                     )) +
+  ylim(0.5, 0.8) +
+  ylab("AUC") +
+  xlab("Family") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, size = 12, vjust = 1, hjust = 1),
+        axis.text.y = element_text(size = 12),
+        title = element_text(size = 15),
+        plot.subtitle = element_text(size = 12),
+        legend.text = element_text(size = 12)) +
+  ggtitle("Assessment of Bipolar Disorder Prediction", subtitle = "AUC of true.status & predictor")
+
+AUC_plot_BIP
+ggsave(here("Results", "AUC_BIP.pdf"), AUC_plot_BIP, width = 20, height = 20, units = "cm")
+```
+
+
+# Checking PA-FGRS
+
+```{r}
+sim.input.list <- list(
+# Depression 
+  list(name="DEP, 4 fam members", index_disorder = "DEP", Ks = c(DEP = 0.19), h2ls = c(DEP = 0.4), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "m", "f"))
+  ,list(name="DEP, 8 fam members", index_disorder = "DEP", Ks = c(DEP = 0.19), h2ls = c(DEP = 0.4), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "sib3", "sib4", "sib5", "sib6", "m", "f"))
+  # Schizphrenia
+  ,list(name="SCZ, 4 fam members", index_disorder = "SCZ", Ks = c(SCZ = 0.005), h2ls = c(SCZ = 0.77), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "m", "f"))
+  ,list(name="SCZ, 8 fam members", index_disorder = "SCZ", Ks = c(SCZ = 0.005), h2ls = c(SCZ = 0.77), rg = 1, sim_reps = sim_reps, sim_size = sim_size, fam_members = c("index", "sib1", "sib2", "sib3", "sib4", "sib5", "sib6", "m", "f"))  
+)
+
+test <- full_sim(sim.input.list = sim.input.list)
+dep_test <- list(test[[1]], test[[2]])
+
+means_se <- as.data.frame(do.call("rbind", map(dep_test, "outcome_meanse")))
+means_se
+
+
+proportion_AUC <- as.data.frame(do.call("rbind",
+lapply(map(dep_test, "outcome_meanse"), # all listed dfs
+       function(x) x[,"FH_DEP_lm.status.proportion_AUC"] ) # extract same column
+))
+proportion_AUC
+
+ltfh_AUC <- as.data.frame(do.call("rbind",
+lapply(map(dep_test, "outcome_meanse"), # all listed dfs
+       function(x) x[,"LTFH_DEP_lm.status.muliab_AUC"] ) # extract same column
+))
+ltfh_AUC
+
+pafgrs_AUC <- as.data.frame(do.call("rbind",
+lapply(map(dep_test, "outcome_meanse"), # all listed dfs
+       function(x) x[,"PAFGRS_DEP_lm.status.muliab_AUC"] ) # extract same column
+))
+pafgrs_AUC
+```
+
+```{r}
+scz_test <- list(test[[3]], test[[4]])
+
+proportion_AUC <- as.data.frame(do.call("rbind",
+lapply(map(scz_test, "outcome_meanse"), # all listed dfs
+       function(x) x[,"FH_SCZ_lm.status.proportion_AUC"] ) # extract same column
+))
+proportion_AUC
+
+ltfh_AUC <- as.data.frame(do.call("rbind",
+lapply(map(scz_test, "outcome_meanse"), # all listed dfs
+       function(x) x[,"LTFH_SCZ_lm.status.muliab_AUC"] ) # extract same column
+))
+ltfh_AUC
+
+pafgrs_AUC <- as.data.frame(do.call("rbind",
+lapply(map(scz_test, "outcome_meanse"), # all listed dfs
+       function(x) x[,"PAFGRS_SCZ_lm.status.muliab_AUC"] ) # extract same column
+))
+pafgrs_AUC
+```
+

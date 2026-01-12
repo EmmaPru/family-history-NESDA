@@ -1,0 +1,145 @@
+---
+title: "Predict depression from FH indicators"
+output: html_document
+date: "2024-27-03"
+---
+
+This script contains
+- assessment of the performance of the indicators in predicting depression
+- step by step calculation of the slope, intercept and ICI for the regression of the indicator on the index in order to check them
+
+```{r setup, include=FALSE}	
+# Clear workspace
+rm(list = ls())
+source(file = "Scripts/setup.R")
+
+# Load data
+load(file = here("Int_results", "indicators_PRS_index.RData"))
+head(indicators_PRS_index)
+# Narrow to sample with PRS, turn DEP_index into factor
+indicators_PRS_index <- indicators_PRS_index |>
+  pivot_wider(names_from = indicator, values_from = value) |>
+  filter(!is.na(PRS)) |>
+  mutate(DEP_index = as.factor(DEP_index)) |>
+  pivot_longer(
+    cols = c("plusminus", "proportion", "FLS", "PAFGRS", "PAFGRSplus", "PRS"),
+    names_to = "indicator",
+    values_to = "value"
+  )
+
+
+# Parameters
+index_disorder <- "DEP"
+index_labels <- paste("index", index_disorder, sep = "_")
+```
+
+
+# Prediction of depression
+```{r}
+# Run with list indicators_PRS_index instead
+# Initiate empty list to store results
+assessment <- list()
+# Parameters
+K <- Ks[index_disorder]
+
+for (type in all_types) {
+  # Select dataframe from list
+  # indicators_df <- indicators_PRS_index[[type]]
+  indicators_df <- indicators_PRS_index |>
+    filter(coding == type) |>
+    pivot_wider(names_from = indicator, values_from = value)
+
+  print(head(indicators_df))
+  # Assess performance for all 5 indicators in predicting depression
+  assessment[[type]] <- sapply(predictors, FUN = function(x) {
+    # Set input arguments
+    diagnosis <- indicators_df[["DEP_index"]]
+    str(diagnosis)
+    # Set predictor
+    predictor <- indicators_df[[x]]
+    str(predictor)
+
+    # Run assessment function
+    assess_performance_dichot(
+      true_status = as.numeric(diagnosis), predictor = predictor, K
+    )
+  })
+}
+
+# Check
+assessment
+```
+
+# Assessment for main results (display item 4)
+
+```{r}
+# AUC of combined model
+# Combine PAFGRSplus and PRS
+
+# Example usage:
+indicators_df <- indicators_PRS_index |>
+  mutate(indicator = as.factor(indicator))
+
+head(indicators_df)
+table(indicators_df$DEP_index, useNA = "ifany")
+table(indicators_df$indicator, useNA = "ifany")
+
+# Assess performance for different predictors
+results <- list(
+  assess_performance_flexibly(indicators_df, coding_type = "DEP_simple", outcome = "DEP_index", predictors = c("plusminus")),
+  assess_performance_flexibly(indicators_df, coding_type = "DEP_simple", outcome = "DEP_index", predictors = c("proportion")),
+  assess_performance_flexibly(indicators_df, coding_type = "DEP_simple", outcome = "DEP_index", predictors = c("FLS")),
+  assess_performance_flexibly(indicators_df, coding_type = "DEP_simple", outcome = "DEP_index", predictors = c("PAFGRS")),
+  assess_performance_flexibly(indicators_df, coding_type = "DEP_simple", outcome = "DEP_index", predictors = c("PAFGRSplus")),
+  assess_performance_flexibly(indicators_df, coding_type = "DEP_simple_with_ANX_simple", outcome = "DEP_index", predictors = c("PAFGRSplus")),
+  assess_performance_flexibly(indicators_df, coding_type = "DEP_simple_with_ANX_simple", outcome = "DEP_index", predictors = c("PRS")),
+  assess_performance_flexibly(indicators_df, coding_type = "DEP_simple_with_ANX_simple", outcome = "DEP_index", predictors = c("PAFGRSplus", "PRS"))
+)
+
+# Convert results list to dataframe
+results_list <- map(results, "results")
+results_list
+results_df <- do.call(rbind, lapply(results_list, as.data.frame))
+rownames(results_df) <- NULL
+results_df
+
+# Double check model coefficients
+model_list <- map(results, "model")
+lapply(model_list, summary) # yes all fine, correspond to results_df
+
+# Compare roc objects of PAFGRS+Sex/Age and PAFGRS+Sex/Age/ANX
+roc_obj_list <- map(results, "roc_obj")
+roc1 <- roc_obj_list[[5]] # PAFGRS+Sex/Age
+roc2 <- roc_obj_list[[6]] # PAFGRS+Sex/Age/ANX
+roc.test(roc1, roc2) # Show's that the difference likely is different from 0
+```
+
+
+
+# Save
+
+```{r}
+# Save results for main display item 4
+assessment_display4 <- results_df
+save(assessment_display4, file = here("Int_results", "assessment_display4.RData"))
+
+# Save results_df for full results table in supplement
+assessment_display4_full_results <- results_df
+write.csv(
+  assessment_display4_full_results,
+  file = here("Results", "assessment_display4_full_results.csv"),
+)
+
+# Save complete results as list
+save(assessment, file = here("Results", "assessment.RData"))
+assessment
+
+# Save each dataframe from complete results as .csv
+for (type in types) {
+  write.csv(
+    assessment[[type]],
+    file = here("Results", paste0("assessment_", type, ".csv")),
+    row.names = TRUE
+  )
+}
+```

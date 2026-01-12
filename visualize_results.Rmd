@@ -1,0 +1,782 @@
+---
+title: "Prediction of Depression by FH - Visualisation"
+output: html_document
+date: "2024-12-09"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+# Clear workspace
+rm(list = ls())
+getwd()
+
+rmarkdown::pandoc_available()
+# Setup - packages and functions
+source(file = "Scripts/indicator_functions.R")
+
+# Load the FH indicators (output of calculate_indicators.Rmd and assess_prediction.Rmd)
+load(file = here("Results", "assessment.RData")) # assessment
+load(file = here("Int_results", "indicators_PRS_index.RData")) # indicators_PRS_index. each df contains pident, index, PRS, respective indicators
+load(file = here("Int_results", "AUC_results_combined.RData")) # AUC and AUC.SE for combined prediction
+load(file = here("Int_results", "assessment_display4.RData")) # dataframe for display item 4
+# NESDA baseline descriptives
+NESDA_descriptives <- read_sav(file = here("Data", "NESDA_DAP2406", "N1_A100R.sav"))
+FTI_famsize <- read.csv(here("Data", "FTI_famsize.csv"))
+load(file = here("Int_results", "FH.RData")) # family history
+
+# Turn DEP_index into factor
+indicators_PRS_index <- indicators_PRS_index |>
+  mutate(DEP_index = as.factor(DEP_index))
+sum(is.na(indicators_PRS_index$value))
+
+# Dataframe for certain descriptives
+FH_long <- FH |>
+  pivot_longer(
+    cols = -c(pident, DEP_index), # adjust to match all relevant columns
+    names_to = "key",
+    values_to = "value"
+  ) |>
+  extract(
+    col = key,
+    into = c("disorder", "coding", "imputation", "fammember"),
+    regex = "^([^_]+)_([^_]+)(?:_([^_]+))?_([^_]+)$", # specifies chunks in column names, with 3rd one being optional
+    remove = TRUE
+  )
+head(FH_long)
+```
+
+# FTI descriptives: Number of relatives and such
+```{r}
+# Number of individuals for each coding type
+simples <- FH_long |>
+  filter(coding == "simple", imputation == "", disorder == "depdiag") |>
+  group_by(pident) |>
+  summarise(
+    n = sum(!is.na(value))
+  ) |>
+  count(n)
+simples
+
+elaborates <- FH_long |>
+  filter(coding == "elaborate", imputation == "", disorder == "depdiag") |>
+  group_by(pident) |>
+  summarise(
+    n = sum(!is.na(value))
+  ) |>
+  count(n)
+elaborates
+
+simples_imputed <- FH_long |>
+  filter(coding == "simple", imputation == "0imputed", disorder == "depdiag") |>
+  group_by(pident) |>
+  summarise(
+    n = sum(!is.na(value))
+  ) |>
+  count(n)
+simples_imputed
+
+elaborates_imputed <- FH_long |>
+  filter(coding == "elaborate", imputation == "0imputed", disorder == "depdiag") |>
+  group_by(pident) |>
+  summarise(
+    n = sum(!is.na(value))
+  ) |>
+  count(n)
+elaborates_imputed
+
+# How many individuals have how many relatives with FH data?
+p1 <- simples %>%
+  ggplot(aes(x = factor(n), y = nn)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "Number of relatives", y = "Count") +
+  theme_minimal()
+p1
+p2 <- elaborates %>%
+  ggplot(aes(x = factor(n), y = nn)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "Number of relatives", y = "Count") +
+  theme_minimal()
+
+p3 <- simples_imputed %>%
+  ggplot(aes(x = factor(n), y = nn)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "Number of relatives", y = "Count") +
+  theme_minimal()
+
+p4 <- elaborates_imputed %>%
+  ggplot(aes(x = factor(n), y = nn)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(x = "Number of relatives", y = "Count") +
+  theme_minimal()
+
+p1 + p2 + p3 + p4 +
+  plot_annotation(
+    title = "Number of relatives with FH data",
+    theme = theme(plot.title = element_text(hjust = 0.5))
+  )
+
+
+# How many individuals are left with no relatives with FH data? Only in the non-imputed
+sum(simples$nn[simples$n != 0])
+sum(elaborates$nn[elaborates$n != 0])
+
+# get the number of individuals that don't have count == 0
+FH_long |>
+  filter(coding == "simple", imputation == "", disorder == "depdiag") |>
+  group_by(DEP_index, pident) |>
+  summarise(
+    n = sum(!is.na(value))
+  ) |>
+  count(n != 0)
+
+FH_long |>
+  filter(coding == "elaborate", imputation == "", disorder == "depdiag") |>
+  group_by(DEP_index, pident) |>
+  summarise(
+    n = sum(!is.na(value))
+  ) |>
+  count(n != 0)
+``` 
+
+# Exploring prevalences and sample sizes
+
+```{r} 
+info <- FH_long |>
+  filter(coding != "2020paper") |>
+  group_by(imputation, coding, disorder) |>
+  summarise(
+    n = sum(!is.na(value)),
+    n_cases = sum(value, na.rm = TRUE),
+    prevalence = sum(value, na.rm = TRUE) / sum(!is.na(value)), .groups = "drop"
+  ) |>
+  bind_rows(
+    FH_long |>
+      filter(coding != "2020paper") |>
+      group_by(DEP_index, imputation, coding, disorder) |>
+      summarise(
+        n = sum(!is.na(value)),
+        n_cases = sum(value, na.rm = TRUE),
+        prevalence = sum(value, na.rm = TRUE) / sum(!is.na(value)), .groups = "drop"
+      )
+  )
+info
+# Effect of imputation
+info |>
+  filter(is.na(DEP_index), disorder == "anxdiag") |>
+  pivot_wider(
+    names_from = c(imputation),
+    values_from = c(prevalence, n)
+  ) |>
+  select(-DEP_index)
+
+info |>
+  filter(is.na(DEP_index), disorder == "depdiag") |>
+  pivot_wider(
+    names_from = c(imputation),
+    values_from = c(prevalence, n)
+  ) |>
+  select(-DEP_index)
+# How can I check whether any additional index individuals were included thanks to the imputation?
+
+
+# Prevalence in cases versus control
+info |>
+  filter(!is.na(DEP_index), disorder == "depdiag", imputation == "") |>
+  select(-imputation, -n) |>
+  pivot_wider(
+    names_from = c(DEP_index),
+    values_from = c(prevalence)
+  )
+
+info |>
+  filter(!is.na(DEP_index), disorder == "anxdiag", imputation == "") |>
+  select(-imputation, -n) |>
+  pivot_wider(
+    names_from = c(DEP_index),
+    values_from = c(prevalence)
+  )
+
+# Sample sizes in simple and elaborate
+info |>
+  filter(is.na(DEP_index), disorder == "depdiag", imputation == "") |>
+  select(-imputation, -DEP_index)
+
+info |>
+  filter(is.na(DEP_index), disorder == "anxdiag", imputation == "") |>
+  select(-imputation, -DEP_index)
+
+# Crosstable simple/elaborate
+temp2 <- FH_long |>
+  pivot_wider(
+    names_from = c(coding, imputation, disorder),
+    values_from = c(value)
+  )
+head(temp2)
+table(temp2$simple__depdiag, temp2$elaborate__depdiag, useNA = "always")
+table(temp2$fammember, temp2$simple__depdiag, useNA = "always")
+```
+
+# Descriptives of final sample - Table 1
+```{r}
+# Make dataframe with all relevant variables
+data_for_descriptives <- indicators_PRS_index |>
+  filter(coding == "DEP_simple") |>
+  pivot_wider(
+    names_from = indicator,
+    values_from = value
+  ) |>
+  left_join(NESDA_descriptives, by = "pident") |>
+  left_join(FTI_famsize, by = "pident")
+head(data_for_descriptives)
+# and add one indicator that includes ANX
+data_for_descriptives <- indicators_PRS_index |>
+  filter(coding == "DEP_simple_with_ANX_simple") |>
+  pivot_wider(
+    names_from = indicator,
+    values_from = value
+  ) |>
+  mutate(PAFGRSplusANX = PAFGRSplus) |>
+  select(pident, PAFGRSplusANX) |>
+  left_join(data_for_descriptives, by = "pident")
+
+# Summarise
+sample <- data_for_descriptives |>
+  group_by(DEP_index) |>
+  summarise(
+    n = n(),
+    mean_age = mean(Age, na.rm = TRUE),
+    sd_age = sd(Age, na.rm = TRUE),
+    percentage_female = sum(Sexe == 2, na.rm = TRUE) / n(),
+    sib_nr_median = median(sib_nr, na.rm = TRUE),
+    sib_nr_iqr = paste(quantile(sib_nr, 0.25, na.rm = TRUE) + 2,
+      quantile(sib_nr, 0.75, na.rm = TRUE) + 2,
+      sep = "-"
+    ),
+    sib_nr_range = paste(range(sib_nr, na.rm = TRUE) + 2, collapse = "-"),
+    proportion_plusminus = sum(plusminus, na.rm = TRUE) / n(),
+    mean_proportion = mean(proportion, na.rm = TRUE),
+    sd_proportion = sd(proportion, na.rm = TRUE),
+    mean_FLS = mean(FLS, na.rm = TRUE),
+    sd_FLS = sd(FLS, na.rm = TRUE),
+    mean_PAFGRS = mean(PAFGRS, na.rm = TRUE),
+    sd_PAFGRS = sd(PAFGRS, na.rm = TRUE),
+    mean_PAFGRSplus = mean(PAFGRSplus, na.rm = TRUE),
+    sd_PAFGRSplus = sd(PAFGRSplus, na.rm = TRUE),
+    mean_PAFGRSplusANX = mean(PAFGRSplusANX, na.rm = TRUE),
+    sd_PAFGRSplusANX = sd(PAFGRSplusANX, na.rm = TRUE),
+    mean_PRS = mean(PRS, na.rm = TRUE),
+    sd_PRS = sd(PRS, na.rm = TRUE)
+  )
+View(sample)
+
+# Build Table 1
+table_1 <- sample |>
+  mutate(
+    age = sprintf("%.2f (%.2f)", mean_age, sd_age),
+    percentage_female = sprintf("%.2f", percentage_female * 100),
+    sib_nr_summary = sprintf("%s (%s; %s)", sib_nr_median + 2, sib_nr_iqr, sib_nr_range),
+    plusminus = sprintf("%.2f", proportion_plusminus * 100),
+    proportion = sprintf("%.2f (%.2f)", mean_proportion, sd_proportion),
+    FLS = sprintf("%.2f (%.2f)", mean_FLS, sd_FLS),
+    PAFGRS = sprintf("%.2f (%.2f)", mean_PAFGRS, sd_PAFGRS),
+    PAFGRSplus = sprintf("%.2f (%.2f)", mean_PAFGRSplus, sd_PAFGRSplus),
+    PAFGRSplusANX = sprintf("%.2f (%.2f)", mean_PAFGRSplusANX, sd_PAFGRSplusANX),
+    PRS = sprintf("%.2f (%.2f)", mean_PRS, sd_PRS)
+  ) |>
+  select(
+    n, age, percentage_female, sib_nr_summary,
+    plusminus, proportion, FLS, PAFGRS, PAFGRSplus, PAFGRSplusANX, PRS
+  )
+table_1 <- as.data.frame(t(table_1))
+rownames(table_1) <- c(
+  "N", "Age (Mean [SD])", "Sex (% female)", "Number of 1st degree relatives (Median [IQR; Range])",
+  "FH+/- (% FH +)", "Proportion (Mean [SD])", "FLS (Mean [SD])",
+  "PAFGRS (Mean [SD])", "PAFGRS+Sex/Age (Mean [SD])", "PAFGRS+Sex/Age/ANX (Mean [SD])", "PRS (Mean [SD])"
+)
+colnames(table_1) <- c("Controls", "MDD Cases")
+View(table_1)
+
+# b) 1st degree relatives with DEP or ANX or both
+# how many relatives have both depression and anxiety?
+temp <- FH_long |>
+  filter(coding == "simple" & imputation == "") |>
+  dplyr::select(pident, disorder, fammember, value) |>
+  pivot_wider(
+    id_cols = c(pident, fammember),
+    names_from = disorder,
+    values_from = value
+  )
+
+# number of relatives with both dep and anx
+both <- temp |>
+  filter(depdiag == 1 & anxdiag == 1) |>
+  dim()
+# number of relatives with info on either dep or anx or both
+complete <- temp |>
+  filter(!is.na(depdiag) | !is.na(anxdiag)) |>
+  dim()
+# Percentage of those with both disorders from the total relatives
+both / complete
+```
+
+
+
+# Correlations
+```{r}
+cors_pearson <- list()
+cors_spearman <- list()
+
+for (type in all_types) {
+  indicators_df <- indicators_PRS_index |>
+    filter(coding == type) |>
+    pivot_wider(names_from = indicator, values_from = value)
+
+  cors_pearson[[type]] <- cov2cor(cov(indicators_df[, predictors], method = "pearson", use = "na.or.complete"))
+  cors_spearman[[type]] <- cov2cor(cov(indicators_df[, predictors], method = "spearman", use = "na.or.complete"))
+}
+
+cors_pearson
+cors_spearman
+save(cors_pearson, cors_spearman, file = here("Int_results", "cors.RData"))
+
+# Draw selected heatmaps
+draw_heatmap(round(cors_pearson[["DEP_simple"]], 3), title = "Pearson Correlation", subtitle = "Depression prediction from FH")
+
+cors_pearson
+cors_pearson[["DEP_elaborate"]]
+```
+
+## Cor matrix df prep
+```{r}
+indicators_ANX_simple <- indicators_PRS_index |>
+  filter(coding == "DEP_simple_with_ANX_simple") |>
+  pivot_wider(names_from = indicator, values_from = value) |>
+  rename("plusminus+ANX" = "plusminus", "proportion+ANX" = "proportion", "FLS+ANX" = "FLS", "PAFGRS+ANX" = "PAFGRS", "PAFGRSplus+ANX" = "PAFGRSplus")
+
+indicators_DEP_simple <- indicators_PRS_index |>
+  filter(coding == "DEP_simple") |>
+  pivot_wider(names_from = indicator, values_from = value)
+
+all_indicators <- cbind(indicators_DEP_simple[, 4:8], indicators_ANX_simple[, 4:9]) |>
+  rename("FH+/-" = "plusminus", "Proportion" = "proportion", "PAFGRS+Sex/Age" = "PAFGRSplus", "PAFGRS+Sex/Age/Anx" = "PAFGRSplus+ANX")
+
+glimpse(all_indicators)
+```
+
+## Display item 3 - Pearson's r
+```{r}
+cors <- cov2cor(cov(all_indicators, use = "na.or.complete", method = "pearson"))
+
+# Alternative using cor.test()
+cor.test(all_indicators$Proportion, all_indicators$PAFGRS, use = "pairwise", method = "pearson", adjust = "none")
+glimpse(all_indicators)
+p_values <- matrix(NA, ncol = ncol(all_indicators), nrow = ncol(all_indicators))
+colnames(p_values) <- colnames(all_indicators)
+rownames(p_values) <- colnames(all_indicators)
+for (i in 1:ncol(all_indicators)) {
+  for (j in 1:ncol(all_indicators)) {
+    if (i != j) {
+      p_values[i, j] <- cor.test(all_indicators[, i], all_indicators[, j], use = "pairwise", method = "pearson")$conf[2]
+    }
+  }
+}
+p_values
+
+p_values <- matrix(NA, ncol = ncol(all_indicators), nrow = ncol(all_indicators))
+colnames(p_values) <- colnames(all_indicators)
+rownames(p_values) <- colnames(all_indicators)
+for (i in 1:ncol(all_indicators)) {
+  for (j in 1:ncol(all_indicators)) {
+    if (i != j) {
+      p_values[i, j] <- cor_test_against_value(all_indicators[, i], all_indicators[, j], rho0 = 0.9)$p_value
+    }
+  }
+}
+View(p_values)
+# Note: SE is always 0.026 because it depends only on the sample size
+
+
+# Display item 3
+cors_df <- cors[
+  c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/Anx", "PRS"),
+  c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/Anx", "PRS")
+]
+
+# Draw selected heatmaps
+heatmap_pearson <- draw_heatmap(cors_df,
+  subtitle = "Family History Indicators and PRS",
+  title = "Correlations between genetic predictors for depression",
+  legend_title = "Pearson's r"
+)
+heatmap_pearson
+```
+
+
+## Cor heatmap - Spearman's rank rho
+```{r}
+cors <- cov2cor(cov(all_indicators, use = "na.or.complete", method = "spearman"))
+
+cors_df <- cors[
+  c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/Anx", "PRS"),
+  c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/Anx", "PRS")
+]
+cors_df
+
+# Draw selected heatmaps
+heatmap_spearman <- draw_heatmap(cors_df,
+  subtitle = "Family History Indicators and PRS",
+  title = "Correlations between genetic predictors for depression",
+  legend_title = "Spearman's rho"
+)
+heatmap_spearman
+```
+
+
+# Indicator distributions
+
+```{r}
+# Initiate empty list to store plots
+viz <- list()
+
+fill_colors <- c(
+  "0" = scales::alpha("#3482A4FF", 1),
+  "1" = scales::alpha("#A4E0BBFF", 0.6)
+)
+
+# Define theme
+my_theme <- theme_minimal() +
+  theme(
+    axis.title.x = element_text(size = 9),
+    axis.title.y = element_text(size = 9),
+    axis.text.x = element_text(size = 9),
+    axis.text.y = element_text(size = 9),
+    legend.position = "none"
+  )
+
+for (type in all_types) {
+  indicators_df <- indicators_PRS_index |>
+    filter(coding == type) |>
+    pivot_wider(names_from = indicator, values_from = value)
+
+  # Distribution of plusminus
+  plusminus <- indicators_df |>
+    summarise(
+      N_plus = sum(plusminus, na.rm = TRUE),
+      N_minus = (sum(!is.na(plusminus)) - sum(plusminus, na.rm = TRUE))
+    ) |>
+    bind_rows(
+      indicators_df |>
+        group_by(DEP_index) |>
+        summarise(
+          N_plus = sum(plusminus, na.rm = TRUE),
+          N_minus = (sum(!is.na(plusminus)) - sum(plusminus, na.rm = TRUE))
+        )
+    )
+
+  # check overlap in distribution of indicators between cases and controls
+  density_prop <- indicators_df |>
+    ggplot(aes(x = proportion, fill = DEP_index)) +
+    geom_density(position = "identity", adjust = 0.5) +
+    labs(
+      x = "Proportion",
+      y = "Density",
+      fill = "Status of Index"
+    ) +
+    scale_fill_manual(
+      values = fill_colors, # Colors for groups
+      labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+    ) +
+    my_theme
+
+  density_prop
+
+  density_FLS <- indicators_df %>%
+    ggplot(aes(x = FLS, fill = DEP_index)) +
+    geom_density(position = "identity", adjust = 0.5) +
+    labs(
+      x = "FLS",
+      y = "Density",
+      fill = "Status of Index"
+    ) +
+    scale_fill_manual(
+      values = fill_colors, # Colors for groups
+      labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+    ) +
+    my_theme
+
+  density_PAFGRS <- indicators_df %>%
+    ggplot(aes(x = PAFGRS, fill = DEP_index)) +
+    geom_density(position = "identity", adjust = 0.5) +
+    labs(
+      x = "PAFGRS",
+      y = "Density",
+      fill = "Status of Index"
+    ) +
+    scale_y_continuous(limits = c(0, 3)) +
+    scale_fill_manual(
+      values = fill_colors, # Colors for groups
+      labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+    ) +
+    my_theme
+
+  density_PAFGRSplus <- indicators_df %>%
+    ggplot(aes(x = PAFGRSplus, fill = DEP_index)) +
+    geom_density(position = "identity", adjust = 0.5) +
+    labs(
+      x = "PAFGRS+Sex/Age",
+      y = "Density",
+      fill = "Status of Index"
+    ) +
+    scale_y_continuous(limits = c(0, 3)) +
+    scale_fill_manual(
+      values = fill_colors, # Colors for groups
+      labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+    ) +
+    my_theme
+
+  density_PRS <- indicators_df %>%
+    ggplot(aes(x = PRS, fill = DEP_index)) +
+    geom_density(position = "identity", adjust = 1.5) +
+    labs(
+      x = "PRS",
+      y = "Density",
+      fill = "Status of Index"
+    ) +
+    scale_y_continuous(limits = c(0, 0.5)) +
+    scale_fill_manual(
+      values = fill_colors, # Colors for groups
+      labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+    ) +
+    my_theme
+
+
+  # Plot assembly
+  density_assembly <- ((density_prop + density_FLS) / (density_PAFGRS + density_PAFGRSplus)) +
+    plot_layout(guides = "collect") +
+    plot_annotation(
+      title = paste0("FH Indicators for Depression", " (", type, ")"),
+      theme = theme(
+        plot.title = element_text(size = 40, face = "bold")
+      )
+    ) & theme_minimal()
+
+  viz[[type]] <- list(
+    plusminus = plusminus,
+    density_prop = density_prop, density_FLS = density_FLS,
+    density_PAFGRS = density_PAFGRS, density_PAFGRSplus = density_PAFGRSplus,
+    density_PRS = density_PRS,
+    density_assembly = density_assembly
+  )
+}
+
+
+# extract all density_assembly plots
+density <- map(viz, "density_assembly")
+#density
+# save(viz, file = here("Results", "NESDA_DEP_viz.RData"))
+
+
+# make barplot in ggplot of plus over plus + minus
+plusminus <- viz$DEP_simple$plusminus %>%
+  filter(!is.na(DEP_index)) %>%
+  ggplot(aes(x = DEP_index, y = N_plus / (N_plus + N_minus), fill = DEP_index)) +
+  geom_bar(stat = "identity", position = "dodge", color = "black") +
+  ylim(0, 1) +
+  labs(
+    y = "Proportion of FH+",
+    fill = "Status of Index"
+  ) +
+  scale_fill_manual(
+    values = fill_colors, # Colors for groups
+    labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+  ) +
+  my_theme +
+  guides(fill = "none")
+
+plusminus <- plusminus + theme_minimal() + theme(axis.title.x = element_blank())
+proportion <- viz$DEP_simple$density_prop + theme_minimal()
+FLS <- viz$DEP_simple$density_FLS + theme_minimal() + theme(axis.title.y = element_blank())
+PAFGRS <- viz$DEP_simple$density_PAFGRS + labs(x = "PAFGRS") + theme_minimal()
+PAFGRS_2 <- viz$DEP_simple$density_PAFGRSplus + theme_minimal() + theme(axis.title.y = element_blank())
+PAFGRS_3 <- viz$DEP_simple_with_ANX_simple$density_PAFGRSplus + labs(x = "PAFGRS+Sex/Age/ANX") + theme_minimal() + theme(axis.title.y = element_blank())
+PRS <- viz$DEP_simple$density_PRS + theme_minimal() + theme(axis.title.y = element_blank())
+
+proportion
+
+# Display item 2
+layout <- "
+ABCD
+EFGH
+"
+
+display_2 <- plusminus + proportion + FLS + guide_area() +
+  PAFGRS + PAFGRS_2 + PAFGRS_3 + PRS +
+  plot_layout(design = layout, guides = "collect") 
+display_2
+```
+
+
+# AUC plots
+
+```{r}
+# List of AUC plots
+predictors <- factor(predictors, levels = predictors)
+AUC_plots <- list()
+for (type in types) {
+  AUC_df <- assessment[[type]] |>
+    t() |>
+    as.data.frame() |>
+    rename(AUC = AUC, SE = AUC.SE)
+  AUC_plots[[type]] <- plot_AUC(AUC_df, groups = predictors, title = type)
+}
+AUC_plots
+
+# With Anxiety as helper trait
+predictors_ANX <- c("plusminus+ANX", "proportion+ANX", "FLS+ANX", "PAFGRS+ANX", "PAFGRSplus+ANX", "PRS")
+# List of AUC plots
+predictors_ANX <- factor(predictors_ANX, levels = predictors_ANX)
+AUC_plots_ANX <- list()
+for (type in types_ANX) {
+  AUC_df <- assessment[[type]] |>
+    t() |>
+    as.data.frame() |>
+    rename(AUC = AUC, SE = AUC.SE)
+  AUC_plots_ANX[[type]] <- plot_AUC(AUC_df, groups = predictors_ANX, title = type)
+}
+AUC_plots_ANX
+
+assessment_assembly <- (AUC_plots$DEP_simple + AUC_plots$DEP_elaborate + plot_spacer()) / (AUC_plots$DEP_simple_0imputed + AUC_plots$DEP_elaborate_0imputed + AUC_plots$DEP_2020paper) +
+  plot_annotation("Prediction of depression in NESDA") & theme(plot.title = element_text(size = 16))
+assessment_assembly
+```
+
+```{r }
+# Display item 4
+assessment_display4
+
+predictors_4 <- c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/ANX", "PRS", "PAFGRS+Sex/Age/ANX\n& PRS\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0")
+predictors_4 <- factor(predictors_4, levels = predictors_4)
+predictors_4
+
+display_4 <- ggplot(data = assessment_display4[1:8, ]) +
+  aes(x = predictors_4, y = AUC) +
+  geom_errorbar(aes(x = predictors_4, ymin = AUC - SE, ymax = AUC + SE), colour = "#35A0ABFF", width = .2, position = position_nudge(0), size = 1) +
+  geom_point(colour = "#35A0ABFF", size = 9 / .pt, shape = 18, position = position_nudge(0)) +
+  ylim(0.55, 0.75) +
+  ylab("AUC") +
+  xlab("") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, size = 9, vjust = 1, hjust = 1),
+    axis.text.y = element_text(size = 9)
+  )
+display_4
+```
+
+
+# OR plot
+
+```{r}
+# Based on script by Pietro
+PGS_PAFGRS_df <- indicators_PRS_index |>
+  filter(coding == "DEP_simple_with_ANX_simple") |>
+  pivot_wider(names_from = indicator, values_from = value) |>
+  dplyr::select(DEP_index, PAFGRSplus, PRS) |>
+  filter(!is.na(PRS))
+
+df <- PGS_PAFGRS_df
+variable <- "PRS" # Change to "PAFGRS" for PAFGRS analysis
+num_quantiles <- 5 # Number of quantiles to create
+
+logistic_regression_quantiles <- function(df, variable, num_quantiles = 5) {
+  # Create quantiles for the variable
+  df <- df %>%
+    mutate(quantile = ntile(get(variable), num_quantiles))
+  head(df)
+  # Info on case/control counts per quantile
+  counts <- df |>
+    group_by(quantile) |>
+    summarise(
+      case_nr = sum(DEP_index == 1),
+      control_nr = sum(DEP_index == 0)
+    )
+
+  # Dependent variable
+  # Fit logistic regression for each quantile
+  model <- glm(DEP_index ~ factor(quantile), family = binomial(link = "logit"), data = df)
+
+  # Extract odds ratios and 95% confidence intervals
+  coefs <- summary(model)$coefficients
+  odds_ratios <- exp(coefs[, 1]) # Convert coefficients to odds ratios
+  ci_lower <- exp(coefs[, 1] - 1.96 * coefs[, 2]) # Lower bound of CI
+  ci_upper <- exp(coefs[, 1] + 1.96 * coefs[, 2]) # Upper bound of CI
+
+  # Create a tidy data frame with quantiles and odds ratios (reference level is quantile 1)
+  result <- data.frame(
+    variable = variable, # Name of the variable (PGS or PAFGRS)
+    quantile = 1:length(odds_ratios), # Quantile numbers
+    se = coefs[, 2], # Standard errors
+    odds_ratio = odds_ratios, # Odds ratios
+    ci_lower = ci_lower, # Lower CI
+    ci_upper = ci_upper, # Upper CI
+    case_nr = counts$case_nr, # Number of cases in each quantile
+    control_nr = counts$control_nr # Number of controls in each quantile
+  )
+
+  # Set odds ratio for quantile 1 to 1 (reference category)
+  result$odds_ratio[1] <- 1
+  result$ci_lower[1] <- 1
+  result$ci_upper[1] <- 1
+
+  return(result)
+}
+
+## Plot: Display item 4b
+pgs_results_quantiles <- logistic_regression_quantiles(PGS_PAFGRS_df, "PRS", num_quantiles = 5) # You can change the num_quantiles to your desired value
+pafgrs_results_quantiles <- logistic_regression_quantiles(PGS_PAFGRS_df, "PAFGRSplus", num_quantiles = 5)
+# Table for supplement
+head(pgs_results_quantiles)
+quantile_details <- cbind(pgs_results_quantiles$quantile, pafgrs_results_quantiles$se, pafgrs_results_quantiles$case_nr, pafgrs_results_quantiles$control_nr,
+  pgs_results_quantiles$se, pgs_results_quantiles$case_nr, pgs_results_quantiles$control_nr)
+
+# Combine the results into one data frame
+combined_results_quantiles <- bind_rows(pgs_results_quantiles, pafgrs_results_quantiles)
+combined_results_quantiles
+
+display_4b <- ggplot(combined_results_quantiles) +
+  aes(x = quantile, y = odds_ratio, color = variable) +
+  geom_point(size = 9 / .pt, shape = 18, position = position_dodge(0.22)) + # Dodge points horizontally
+  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2, position = position_dodge(0.22), size = 1) + # Thicker error bars
+  labs(
+    x = "Quantile", y = "Odds Ratio", color = "Genetic Indicator"
+  ) +
+  scale_color_manual(
+    values = c("PRS" = "#3A2C59FF", "PAFGRSplus" = "#5ACCADFF"),
+    labels = c("PRS" = "PRS", "PAFGRSplus" = "PAFGRS+Sex/Age/ANX")
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title = element_text(size = 9),
+    axis.text = element_text(size = 9),
+    legend.text = element_text(size = 9),
+    legend.title = element_text(size = 9)
+  )
+display_4b
+```
+
+# Save figures and tables
+```{r}
+# Main
+write.csv(table_1, file = here("Results", "Table_1.csv"), row.names = TRUE)
+ggsave(here("Results", "Figure3.pdf"), heatmap_pearson, width = 21, height = 12.7, units = "cm")
+ggsave(here("Results", "Figure2.pdf"), display_2, width = 21, height = 12.7, units = "cm")
+ggsave(here("Results", "Figure4.pdf"), display_4, width = 21, height = 12.7, units = "cm")
+ggsave(here("Results", "Figure4b.pdf"), display_4b, width = 21, height = 12.7, units = "cm")
+
+# Supplement
+ggsave(here("Results", "NESDA_cor_heatmap_spearman.pdf"), heatmap_spearman, width = 21, height = 12.7, units = "cm")
+write.csv(quantile_details, file = here("Results", "quantile_details.csv"), row.names = FALSE)
+
+```
