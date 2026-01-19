@@ -46,8 +46,10 @@ Ks_male <- c(DEP = 0.131, ANX = 0.159)
 
 
 # Prevalence by sex and age from mcgrath et al. 2023
-age_points <- c(0, 15, 30, 45, 60, 75, 140) # Note: age > 75 -> K(75). from inspecting visually, the curve is good roughly until age 110
-K_DEP_female <- c(0, 0.034, 0.168, 0.256, 0.309, 0.34, 0.35) # cumulative incidence of MDD in females. last data point is made up
+age_points <- c(0, 15, 30, 45, 60, 75, 140) # Note: age > 75 -> K(75). 
+# From inspecting visually, the curve displays reasonable estimates up to age 110.
+# The last value in prevalence vectors below, corresponding to age 140, is a reasonable value selected for modelling purposes (not contained in the literature).
+K_DEP_female <- c(0, 0.034, 0.168, 0.256, 0.309, 0.34, 0.35) # cumulative incidence of MDD in females.
 K_DEP_male <- c(0, 0.02, 0.096, 0.148, 0.184, 0.201, 0.211) # cumulative incidence of MDD in males.
 K_ANX_female <- c(0, 0.130, 0.205, 0.257, 0.293, 0.31, 0.32) # cumulative incidence of ANX in females.
 K_ANX_male <- c(0, 0.076, 0.12, 0.15, 0.17, 0.183, 0.193) # cumulative incidence of ANX in males.
@@ -546,3 +548,4 @@ plot_AUC <- function(df, groups, title) {
     ) +
     ggtitle(title)
 }
+
