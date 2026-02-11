@@ -1,6 +1,6 @@
 # Overview
 
-This directory contains the scripts used for Comparing family history indicators and polygenic scores in depressive disorder (add full reference)
+This directory contains the scripts used for Comparing family history indicators and polygenic scores in depressive disorder (preprint: https://www.medrxiv.org/content/10.64898/2026.01.19.26343941v1)
 
 Support available (12 January 2026).
 
