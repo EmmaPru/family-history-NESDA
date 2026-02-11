@@ -1,6 +1,8 @@
 # Overview
 
-This directory contains the scripts used for Comparing family history indicators and polygenic scores in depressive disorder (preprint: https://www.medrxiv.org/content/10.64898/2026.01.19.26343941v1)
+This directory contains the scripts used for the article *Comparing family history indicators and polygenic scores in depressive disorder*.
+
+Preprint reference: Pruin, E., Milaneschi, Y., Bartels, M., Bassani, P., Penninx, B., & Peyrot, W. J. (2026). Comparing family history indicators and polygenic scores in depressive disorder (p. 2026.01.19.26343941). medRxiv. https://doi.org/10.64898/2026.01.19.26343941
 
 Support available (12 January 2026).
 
