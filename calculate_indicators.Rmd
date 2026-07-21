@@ -373,16 +373,6 @@ pident_to_exclude <- indicators_PRS_index |>
     mutate(final_exclude = exclude | extra_exclude)
 pident_to_exclude
 
-# Sanity check: comparison with those excluded in acylcarnitines project
-pident_to_exclude$pident %in% c(
-    110025, 110015, 110104, 210042, 330029, 330003, 330055, 330370, 330060, 330303,
-    130003, 330112, 110282, 330143, 330142, 330377, 330103, 330009, 310012, 330298,
-    210127, 330113, 330197, 110799, 210178, 330369, 210172, 330246, 330116, 220122,
-    210242, 330358, 210272, 330228, 210283, 330295, 110701, 330334, 330388, 330330,
-    330356, 330355, 330354, 210458, 320033, 210305, 210303, 330302, 210529, 210466,
-    220310, 219493, 210509, 310598
-)
-
 # Exclude these individuals from indicators_PRS_index
 indicators_PRS_index <- indicators_PRS_index |>
     filter(!(pident %in% pident_to_exclude$pident[pident_to_exclude$final_exclude]))
