@@ -1,3 +1,7 @@
+# This script 
+# contains tests for functions defined in indicator_functions.R, namely:
+# FH_plusminus, case_proportion, apply_pafgrs, FLS, score_FH
+
 
 install.packages("testthat")
 library(testthat)

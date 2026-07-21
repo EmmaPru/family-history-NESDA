@@ -1,3 +1,10 @@
+#
+# This script
+# generates lifetime diagnoses for NESDA participants by updating baseline up to Wave 6
+# for depression, anxiety and bipolar disorder
+# Input: diagnosis files from all waves
+# Output: NESDA_lifetime_diagnoses.csv (all controls) and NESDA_lifetime_depression_cleaned.csv (controls cleaned from anxiety/bipolar)
+# Status: Sure hope it runs.
 
 # Set up
 packages = c("dplyr", 

@@ -12,9 +12,16 @@
 # 1. A dataset with the diagnoses of depression and anxiety for each family member.
 # 2. A dataset with the prevalence of depression and anxiety diagnoses in the FTI dataset.
 
+# This script
+# 1) assesses and processes FTI diagnoses for depression and anxiety
+# 2) creates diagnoses based on simple and elaborate criteria, with and without imputation
+# 3) compares prevalences and cross-tables of different assessment types
+# Input: age.RData (from NESDA_FTI_preprocessing_general.R)
+# Output: FTI_diagnoses.csv (with diagnoses for depression and anxiety for each family member)
+# Status: A delicate construction.
+
 #  Load packages and functions
-setwd("../Scripts")
-source(file = "setup.R")
+source(file = "Scripts/setup.R")
 
 theme_set(theme_minimal()) # set default theme for ggplot
 
@@ -25,8 +32,8 @@ load(file = here("Data", "age.RData"))
 #     1) If g05 is 'no' or 'don't know', the disorder questions are not asked. 
 #     2) If there is no 'yes' in the first two core questions, the follow-up questions are not asked.
 
-#### anxiety ####
-# Investigate anxiety questions
+#### Depression ####
+# Investigate depression questions
 dep <- age |> 
   select(pident, fammember, g05, d01, d02, d05, d05a, d05b, d06, d07a, d07b)
 
@@ -432,5 +439,4 @@ save(cross_impute0_anx, file = here("Results", "crosstable_impute0_anx.RData"))
 
 # Save for future use
 diagnoses <- full_join(dep, anx, by = c("pident", "fammember", "g05"))
-glimpse(diagnoses)
 write.csv(diagnoses, file = here("Data", "FTI_diagnoses.csv"))

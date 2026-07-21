@@ -5,12 +5,17 @@ date: "2024-27-03"
 ---
 
 This script contains
-- assessment of the performance of the indicators in predicting depression
-- step by step calculation of the slope, intercept and ICI for the regression of the indicator on the index in order to check them
+1) full assessment of the performance of the indicators in predicting depression
+2) modified list of assessment results for Figure 4, including combined models
+Input: Scripts/setup.R, indicators_PRS_index.RData
+Output: assessment.RData, assessment_display4.RData, assessment_display4_full_results.csv
+Status: Running
 
 ```{r setup, include=FALSE}	
 # Clear workspace
 rm(list = ls())
+getwd()
+setwd("LT-FH")
 source(file = "Scripts/setup.R")
 
 # Load data
@@ -114,6 +119,79 @@ roc2 <- roc_obj_list[[6]] # PAFGRS+Sex/Age/ANX
 roc.test(roc1, roc2) # Show's that the difference likely is different from 0
 ```
 
+# Repeat assessment with scaled indicators for interpretable coefficients
+```{r}
+indicators_df <- indicators_PRS_index |>
+  mutate(indicator = as.factor(indicator))
+head(indicators_df)
+
+indicators_scaled <- indicators_df |>
+  pivot_wider(names_from = c(coding, indicator), values_from = value) |>
+  mutate(across(.cols = c(ends_with("plusminus"), ends_with("proportion"), ends_with("FLS"), ends_with("PAFGRS"), ends_with("PAFGRSplus")),
+                .fns = ~ as.numeric(scale(.)))) |>
+  pivot_longer(cols = -c(pident, DEP_index), names_to = c("coding", "indicator"), values_to = "value",
+               names_sep = "_(?=[^_]+$)")  # split at the final underscore
+head(indicators_scaled)
+write.csv(indicators_scaled, file = here("Int_results", "indicators_scaled.csv"), row.names = FALSE)
+
+temp <- indicators_scaled |>
+  filter(coding == "DEP_simple") |>
+  pivot_wider(names_from = indicator, values_from = value)
+head(temp)
+
+summary(as.numeric(temp$plusminus))
+summary(as.numeric(temp$proportion))
+summary(as.numeric(temp$FLS))
+summary(as.numeric(temp$PAFGRS))
+summary(as.numeric(temp$PAFGRSplus))
+summary(as.numeric(temp$PRS))
+
+sd(as.numeric(temp$plusminus))
+sd(as.numeric(temp$proportion))
+sd(as.numeric(temp$FLS))
+sd(as.numeric(temp$PAFGRS))
+sd(as.numeric(temp$PAFGRSplus))
+sd(as.numeric(temp$PRS))
+
+plot(density(as.numeric(temp$plusminus), na.rm = TRUE), main = "Density plot of Scaled PlusMinus")
+plot(density(as.numeric(temp$proportion), na.rm = TRUE), main = "Density plot of Scaled Proportion")
+plot(density(as.numeric(temp$FLS), na.rm = TRUE), main = "Density plot of Scaled FLS")
+plot(density(as.numeric(temp$PAFGRS), na.rm = TRUE), main = "Density plot of Scaled PAFGRS")
+plot(density(as.numeric(temp$PAFGRSplus), na.rm = TRUE), main = "Density plot of Scaled PAFGRSplus")
+plot(density(rnorm(1e4)))
+
+# Run assessment
+# Assess performance for different predictors
+results_scaled <- list(
+  assess_performance_flexibly(indicators_scaled, coding_type = "DEP_simple", outcome = "DEP_index", predictors = c("plusminus")),
+  assess_performance_flexibly(indicators_scaled, coding_type = "DEP_simple", outcome = "DEP_index", predictors = c("proportion")),
+  assess_performance_flexibly(indicators_scaled, coding_type = "DEP_simple", outcome = "DEP_index", predictors = c("FLS")),
+  assess_performance_flexibly(indicators_scaled, coding_type = "DEP_simple", outcome = "DEP_index", predictors = c("PAFGRS")),
+  assess_performance_flexibly(indicators_scaled, coding_type = "DEP_simple", outcome = "DEP_index", predictors = c("PAFGRSplus")),
+  assess_performance_flexibly(indicators_scaled, coding_type = "DEP_simple_with_ANX_simple", outcome = "DEP_index", predictors = c("PAFGRSplus")),
+  assess_performance_flexibly(indicators_scaled, coding_type = "DEP_simple_with_ANX_simple", outcome = "DEP_index", predictors = c("PRS")),
+  assess_performance_flexibly(indicators_scaled, coding_type = "DEP_simple_with_ANX_simple", outcome = "DEP_index", predictors = c("PAFGRSplus", "PRS"))
+)
+# Convert results list to dataframe
+results_list_scaled <- map(results_scaled, "results")
+results_list_scaled
+results_df_scaled <- do.call(rbind, lapply(results_list_scaled, as.data.frame))
+rownames(results_df_scaled) <- NULL
+results_df_scaled
+
+# Add column with ORs per SD increase
+results_df_scaled <- results_df_scaled |>
+  mutate(
+    OR = exp(coeff),
+    ci_lower = exp(coeff - 1.96 * coeff.SE), # Lower bound of CI
+    ci_upper = exp(coeff + 1.96 * coeff.SE) # Upper bound of CI
+  ) 
+results_df_scaled
+  
+results_df_scaled_for_table <- results_df_scaled |>
+  mutate(AUC = round(AUC, 3), `SE (AUC)` = round(SE, 3), Coefficient = round(coeff, 3), `SE (Coefficient)` = round(coeff.SE, 3), 
+  OR = round(OR, 2), `95% CI Lower` = round(ci_lower, 2), `95% CI Upper` = round(ci_upper, 2), `P-value` = pvalue, .keep = "unused") 
+```
 
 
 # Save
@@ -142,4 +220,8 @@ for (type in types) {
     row.names = TRUE
   )
 }
+
+# Save results_df
+save(results_df_scaled, file = here("Int_results", "results_df_scaled.RData"))
+write.csv(results_df_scaled_for_table, file = here("Int_results", "results_scaled_table.csv"))
 ```

@@ -4,13 +4,20 @@ output: html_document
 date: "2024-07-02"
 ---
 
-This script contains:
-- calculation of the prevalence of depression in cases and controls for simple and elaborate coding
+This script
+1) prepares the dataframes for family history indicator calculation by separating for assessment type  
+2) calculates the family history indicators for depression only, and depression + anxiety  
+3) prepares a file with pident, PRS and FH indicators, excluding related individuals
+Input: Scripts/indicator_functions.R, joint_fam_work_R2.csv, DAP2406_PRS_pident.sav, NESDA_lifetime_depression_cleaned.csv, FTI_famsize.csv, FTI_age.csv, FTI_diagnoses.csv
+Output: Int_results/FH.RData, Int_results/indicators_PRS_index.RData, Int_results/indicators_with_index.RData
+Status: Running
+!!! Contains pidents of related individuals
+
+
 - preparation of dataframes for indicator calculation
 - calculation of the FH indicators for DEP, and DEP+ANX
 - preparation of file with pident, PRS and FH indicators
 - generation of descriptives of the final sample (FTI and PRS available)
-
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
@@ -33,6 +40,11 @@ index_diagnoses <- read.csv(here("Data", "NESDA_lifetime_depression_cleaned.csv"
 FTI_famsize <- read.csv(here("Data", "FTI_famsize.csv"))
 FTI_age <- read.csv(here("Data", "FTI_age.csv"))
 FTI_diagnoses <- read.csv(here("Data", "FTI_diagnoses.csv"))
+
+# How many relatives were missing age information? 182/8005 = 2.27%
+dim(FTI_age)
+sum(is.na(FTI_age$age))
+182/8005
 ```
 
 # Data prep
@@ -48,20 +60,18 @@ FH_full <- FTI_diagnoses |>
     )
 
 # Merge index diagnoses with FTI diagnoses
-# remove those with missing DEP_index
+# remove those with missing DEP_index # I don't remember why this was done, becomes more complicated when including ANX
 index_diagnoses <- index_diagnoses |>
     rename("DEP_index" = "caseDEP") |>
-    filter(!is.na(DEP_index))
+    rename("ANX_index" = "ever_anx")
+head(index_diagnoses)
 
-FH <- index_diagnoses[c("pident", "DEP_index")] |>
+FH <- index_diagnoses[c("pident", "DEP_index", "ANX_index")] |>
     inner_join(FH_full, by = "pident")
 dim(FH)
 
 # Final sample pidents to align all parameters
 current_sample <- FH$pident
-
-# Set index disorder
-index_disorder <- "DEP"
 
 # Prepare sex and age data
 # Sex is derived from recorded type of family member (mother vs. father, brother vs. sister)
@@ -201,14 +211,13 @@ lapply(FTI_data, head)
 ```
 
 
-# Calculate FH indicators
+# Calculate FH indicators for index disorder depression
 ```{r }
-indicators <- list()
-indicators_with_index <- list()
-
+indicators_dep <- list()
+indicators_with_index_dep <- list()
 # One loop for indicators based on family history of depression only
 for (type in types) {
-    indicators[[type]] <- score_FH(FTI_data[[type]],
+    indicators_dep[[type]] <- score_FH(FTI_data[[type]],
         methods = c("plusminus", "proportion", "PAFGRS", "PAFGRSplus", "FLS"),
         family_sizes = famsize, sexes = sex_df, ages = age_df,
         disorders = c("DEP"), index_disorder = "DEP", disorder_FLS = "DEP",
@@ -217,12 +226,12 @@ for (type in types) {
         AO_lower = AO_lower, AO_upper = AO_upper
     )
     # for certain plots, add index individual's diagnostic status
-    indicators_with_index[[type]] <- cbind(FH["DEP_index"], indicators[[type]])
+    indicators_with_index_dep[[type]] <- cbind(FH["DEP_index"], indicators_dep[[type]])
 }
 
 # One loop for indicators based on family history of depression and anxiety, items added to same list as above
 for (type in types_ANX) {
-    indicators[[type]] <- score_FH(FTI_data[[type]],
+    indicators_dep[[type]] <- score_FH(FTI_data[[type]],
         methods = c("plusminus", "proportion", "PAFGRS", "PAFGRSplus", "FLS"),
         family_sizes = famsize, sexes = sex_df, ages = age_df,
         disorders = c("DEP", "ANX"), index_disorder = "DEP", disorder_FLS = "DEP.ANX",
@@ -231,19 +240,72 @@ for (type in types_ANX) {
         AO_lower = AO_lower, AO_upper = AO_upper
     )
     # for certain plots, add index individual's diagnostic status
-    indicators_with_index[[type]] <- cbind(FH["DEP_index"], indicators[[type]])
+    indicators_with_index_dep[[type]] <- cbind(FH["DEP_index"], indicators_dep[[type]])
 }
 
-# Check proportion indicator
-check <- indicators_with_index[["DEP_simple"]] |>
-    select(proportion)
-table(check$proportion, useNA = "ifany")
-hist(check$proportion)
+head(indicators_with_index_dep[["DEP_elaborate"]])
+str(indicators_with_index_dep)
+
+```
+
+# Calculate FH indicators for index disorder anxiety
+
+```{r }
+indicators_anx <- list()
+indicators_with_index_anx <- list()
+
+# Prep data for ANX Simple indicators (NO dep)
+FTI_anx <- FTI_data[["DEP_simple_with_ANX_simple"]] |>
+    dplyr::select(ends_with("ANX"))
+# One loop for indicators based on family history of anxiety only
+for (type in "ANX_simple") {
+    indicators_anx[[type]] <- score_FH(FTI_anx,
+        methods = c("plusminus", "proportion", "PAFGRS", "PAFGRSplus", "FLS"),
+        family_sizes = famsize, sexes = sex_df, ages = age_df,
+        disorders = c("ANX"), index_disorder = "ANX", disorder_FLS = "ANX",
+        Ks = Ks["ANX"], h2ls = h2ls["ANX"], rgs = rg_DEP.ANX,
+        threshold_list = disorder_thresholds, K_relative = K_relative, K_sporadic = K_sporadic,
+        AO_lower = AO_lower, AO_upper = AO_upper
+    )
+    # for certain plots, add index individual's diagnostic status
+    indicators_with_index_anx[[type]] <- cbind(FH["ANX_index"], indicators_anx[[type]])
+}
+str(indicators_anx)
+
+# One loop for indicators based on family history of depression and anxiety, items added to same list as above
+# draws input from FTI_data
+for (type in "DEP_simple_with_ANX_simple") {
+    indicators_anx[[type]] <- score_FH(FTI_data[[type]],
+        methods = c("plusminus", "proportion", "PAFGRS", "PAFGRSplus", "FLS"),
+        family_sizes = famsize, sexes = sex_df, ages = age_df,
+        disorders = c("DEP", "ANX"), index_disorder = "ANX", disorder_FLS = "DEP.ANX",
+        Ks = Ks[c("DEP", "ANX")], h2ls = h2ls[c("DEP", "ANX")], rgs = rg_DEP.ANX,
+        threshold_list = disorder_thresholds, K_relative = K_relative, K_sporadic = K_sporadic,
+        AO_lower = AO_lower, AO_upper = AO_upper
+    )
+    # for certain plots, add index individual's diagnostic status
+    indicators_with_index_anx[[type]] <- cbind(FH["ANX_index"], indicators_anx[[type]])
+}
+```
+
+# Checks
+```{r}
+add_pident <- indicators_with_index_dep[["DEP_elaborate"]] |>
+        mutate(pident = FH$pident) |>
+        mutate(coding = type)
+
+
+
+head(indicators_anx[["DEP_simple_with_ANX_simple"]])
+head(indicators_dep[["DEP_simple_with_ANX_simple"]])
+
+head(indicators_with_index_anx[["DEP_elaborate_with_ANX_elaborate"]])
+head(indicators_with_index_dep[["DEP_simple_with_ANX_simple"]])
+str(indicators_with_index_anx)
 ```
 
 
-
-# Prep file with pident and PRS. 
+# Prep file with pident and PRS (index disorder depression)
 Exclusion steps:
 - Exclude relatives with PRS missing
 - Exclude one index individual per related pair (known siblings in NESDA)
@@ -254,11 +316,11 @@ Exclusion steps:
 PRS <- PRS |>
     dplyr::select(pident, SCORE1_SUM) |>
     mutate(PRS = c(scale(SCORE1_SUM)), .keep = "unused")
-
+head(PRS)
 # Add pident to indicators_with_index and merge with PRS
 indicators_PRS_index <- list()
 for (type in all_types) {
-    add_pident <- indicators_with_index[[type]] |>
+    add_pident <- indicators_with_index_dep[[type]] |>
         mutate(pident = FH$pident) |>
         mutate(coding = type)
     # Merge with PRS. The default is an inner join, where only matching pidents are maintained.
@@ -268,6 +330,11 @@ for (type in all_types) {
         by = "pident"
     )
 }
+
+add_pident <- indicators_with_index_dep[["DEP_elaborate"]] |>
+        mutate(pident = FH$pident) |>
+        mutate(coding = type)
+head(add_pident)
 
 sapply(indicators_PRS_index, function(x) sum(is.na(x$PRS))) # there should be no NAs
 sapply(indicators_PRS_index, function(x) dim(x)) # resulting in this many individuals
@@ -292,10 +359,10 @@ pident_to_exclude <- indicators_PRS_index |>
     filter(n > 1) |>
     select(pident, DEP_index, fam_number, n) |>
     arrange(fam_number) |>
-    mutate(exclude = DEP_index == 1 & any(DEP_index == 0)) |>
+    mutate(exclude = dplyr::coalesce(DEP_index == 1 & any(DEP_index == 0, na.rm = TRUE), FALSE)) |>
     mutate(
         # If more than one row is not excluded, randomly exclude all but one
-        extra_exclude = if (sum(!exclude) > 1) {
+        extra_exclude = if (sum(!exclude, na.rm = TRUE) > 1) {
             temp <- which(!exclude)
             to_exclude <- sample(temp, length(temp) - 1)
             seq_along(exclude) %in% to_exclude
@@ -304,20 +371,39 @@ pident_to_exclude <- indicators_PRS_index |>
         }
     ) |>
     mutate(final_exclude = exclude | extra_exclude)
+pident_to_exclude
 
 # Sanity check: comparison with those excluded in acylcarnitines project
-### hidden in public version ###
+pident_to_exclude$pident %in% c(
+    110025, 110015, 110104, 210042, 330029, 330003, 330055, 330370, 330060, 330303,
+    130003, 330112, 110282, 330143, 330142, 330377, 330103, 330009, 310012, 330298,
+    210127, 330113, 330197, 110799, 210178, 330369, 210172, 330246, 330116, 220122,
+    210242, 330358, 210272, 330228, 210283, 330295, 110701, 330334, 330388, 330330,
+    330356, 330355, 330354, 210458, 320033, 210305, 210303, 330302, 210529, 210466,
+    220310, 219493, 210509, 310598
+)
 
 # Exclude these individuals from indicators_PRS_index
 indicators_PRS_index <- indicators_PRS_index |>
     filter(!(pident %in% pident_to_exclude$pident[pident_to_exclude$final_exclude]))
 ```
 
+
 # Save
 
 ```{r}
+# Save indicators
+save(indicators_with_index_dep, file = here("Int_results", "indicators_with_index_dep.RData"))
+save(indicators_with_index_anx, file = here("Int_results", "indicators_with_index_anx.RData"))
+
+pident_for_FH <- FH$pident
+save(pident_for_FH, file = here("Int_results", "pident_for_FH.RData"))
+
+# Save pidents that should be exluded due to relatedness
+save(pident_to_exclude, file = here("Int_results", "pident_to_exclude.RData"))
+
 # Save
 save(FH, file = here("Int_results", "FH.RData"))
-save(indicators_PRS_index, file = here("Int_results", "indicators_PRS_index.RData"))
-save(indicators_with_index, file = here("Int_results", "indicators_with_index.RData"))
+#save(indicators_PRS_index, file = here("Int_results", "indicators_PRS_index.RData"))
+#save(indicators_with_index, file = here("Int_results", "indicators_with_index.RData"))
 ```

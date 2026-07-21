@@ -4,6 +4,19 @@ output: html_document
 date: "2024-12-09"
 ---
 
+This script creates the folllowing visualizations:
+1) Descriptives of FTI data availability, also by assessment type
+2) Prevalences of disorders in relatives
+3) Descriptives of final sample (Table 1)
+4) Plot of sex- and age-specific prevalences for PAFGRS+Sex/Age
+5) Generation of full correlation matrices and heatmaps to display (Figure 3)
+6) Distributions of indicators (Figure 2)
+7) AUC plots (Figure 4)
+8) OR plots (Figure 5)
+Input: Scripts/indicator_functions.R, assessment.RData, indicators_PRS_index.RData, AUC_results_combined.RData, assessment_display4.RData, NESDA_DAP2406/N1_A100R.sav, FTI_famsize.csv, FH.RData
+Output: Main and supplementary figures and tables (see final code chunk)
+Status: Running
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 
@@ -19,7 +32,8 @@ source(file = "Scripts/indicator_functions.R")
 load(file = here("Results", "assessment.RData")) # assessment
 load(file = here("Int_results", "indicators_PRS_index.RData")) # indicators_PRS_index. each df contains pident, index, PRS, respective indicators
 load(file = here("Int_results", "AUC_results_combined.RData")) # AUC and AUC.SE for combined prediction
-load(file = here("Int_results", "assessment_display4.RData")) # dataframe for display item 4
+load(file = here("Int_results", "assessment_display4.RData")) # dataframe for display item
+load(file = here("Int_results", "results_df_scaled.RData")) # results with ORs per SD increase
 # NESDA baseline descriptives
 NESDA_descriptives <- read_sav(file = here("Data", "NESDA_DAP2406", "N1_A100R.sav"))
 FTI_famsize <- read.csv(here("Data", "FTI_famsize.csv"))
@@ -29,8 +43,12 @@ load(file = here("Int_results", "FH.RData")) # family history
 indicators_PRS_index <- indicators_PRS_index |>
   mutate(DEP_index = as.factor(DEP_index))
 sum(is.na(indicators_PRS_index$value))
+head(indicators_PRS_index)
+dim(indicators_PRS_index)
+sum(!duplicated(indicators_PRS_index$pident))
 
 # Dataframe for certain descriptives
+# Reshape, extract relevant columns, keep only pidents that are in indicators_PRS_index (equivalent to final sample)
 FH_long <- FH |>
   pivot_longer(
     cols = -c(pident, DEP_index), # adjust to match all relevant columns
@@ -42,8 +60,13 @@ FH_long <- FH |>
     into = c("disorder", "coding", "imputation", "fammember"),
     regex = "^([^_]+)_([^_]+)(?:_([^_]+))?_([^_]+)$", # specifies chunks in column names, with 3rd one being optional
     remove = TRUE
-  )
+  ) |>
+  filter(pident %in% indicators_PRS_index$pident) # keep only pidents that are present in indicators_PRS_index
+
 head(FH_long)
+dim(FH_long)
+sum(!duplicated(FH_long$pident))
+assessment
 ```
 
 # FTI descriptives: Number of relatives and such
@@ -56,7 +79,6 @@ simples <- FH_long |>
     n = sum(!is.na(value))
   ) |>
   count(n)
-simples
 
 elaborates <- FH_long |>
   filter(coding == "elaborate", imputation == "", disorder == "depdiag") |>
@@ -65,7 +87,6 @@ elaborates <- FH_long |>
     n = sum(!is.na(value))
   ) |>
   count(n)
-elaborates
 
 simples_imputed <- FH_long |>
   filter(coding == "simple", imputation == "0imputed", disorder == "depdiag") |>
@@ -74,7 +95,6 @@ simples_imputed <- FH_long |>
     n = sum(!is.na(value))
   ) |>
   count(n)
-simples_imputed
 
 elaborates_imputed <- FH_long |>
   filter(coding == "elaborate", imputation == "0imputed", disorder == "depdiag") |>
@@ -83,31 +103,34 @@ elaborates_imputed <- FH_long |>
     n = sum(!is.na(value))
   ) |>
   count(n)
-elaborates_imputed
 
 # How many individuals have how many relatives with FH data?
 p1 <- simples %>%
   ggplot(aes(x = factor(n), y = nn)) +
   geom_bar(stat = "identity", fill = "steelblue") +
   labs(x = "Number of relatives", y = "Count") +
+  ggtitle("Short assessment") +
   theme_minimal()
-p1
+
 p2 <- elaborates %>%
   ggplot(aes(x = factor(n), y = nn)) +
   geom_bar(stat = "identity", fill = "steelblue") +
   labs(x = "Number of relatives", y = "Count") +
+  ggtitle("Extended assessment") +
   theme_minimal()
 
 p3 <- simples_imputed %>%
   ggplot(aes(x = factor(n), y = nn)) +
   geom_bar(stat = "identity", fill = "steelblue") +
   labs(x = "Number of relatives", y = "Count") +
+  ggtitle("Short assessment, imputed") +
   theme_minimal()
 
 p4 <- elaborates_imputed %>%
   ggplot(aes(x = factor(n), y = nn)) +
   geom_bar(stat = "identity", fill = "steelblue") +
   labs(x = "Number of relatives", y = "Count") +
+  ggtitle("Extended assessment, imputed") +
   theme_minimal()
 
 p1 + p2 + p3 + p4 +
@@ -116,27 +139,14 @@ p1 + p2 + p3 + p4 +
     theme = theme(plot.title = element_text(hjust = 0.5))
   )
 
-
+# Supplementary Table X
 # How many individuals are left with no relatives with FH data? Only in the non-imputed
-sum(simples$nn[simples$n != 0])
-sum(elaborates$nn[elaborates$n != 0])
-
-# get the number of individuals that don't have count == 0
-FH_long |>
-  filter(coding == "simple", imputation == "", disorder == "depdiag") |>
-  group_by(DEP_index, pident) |>
-  summarise(
-    n = sum(!is.na(value))
-  ) |>
-  count(n != 0)
-
-FH_long |>
-  filter(coding == "elaborate", imputation == "", disorder == "depdiag") |>
-  group_by(DEP_index, pident) |>
-  summarise(
-    n = sum(!is.na(value))
-  ) |>
-  count(n != 0)
+simple_n <- c(sum(simples$nn[simples$n != 0]), sum(simples_imputed$nn[simples_imputed$n != 0]))
+elaborates_n <- c(sum(elaborates$nn[elaborates$n != 0]), sum(elaborates_imputed$nn[elaborates_imputed$n != 0]))
+gain_in_index <- as.data.frame(rbind(simple_n, elaborates_n))
+colnames(gain_in_index) <- c("No imputation", "With imputation")
+rownames(gain_in_index) <- c("Short assessment", "Extended assessment")
+gain_in_index
 ``` 
 
 # Exploring prevalences and sample sizes
@@ -161,24 +171,59 @@ info <- FH_long |>
       )
   )
 info
-# Effect of imputation
-info |>
-  filter(is.na(DEP_index), disorder == "anxdiag") |>
-  pivot_wider(
-    names_from = c(imputation),
-    values_from = c(prevalence, n)
-  ) |>
-  select(-DEP_index)
 
-info |>
+# Supplementary Table X
+# Effect of imputation (gain in index individuals see above)
+# Depression
+dep_imp <- info |>
   filter(is.na(DEP_index), disorder == "depdiag") |>
   pivot_wider(
     names_from = c(imputation),
     values_from = c(prevalence, n)
   ) |>
-  select(-DEP_index)
-# How can I check whether any additional index individuals were included thanks to the imputation?
+  select(-DEP_index)|> # switch rows to reverse
+  arrange(desc(coding))
+# Anxiety
+anx_imp <- info |>
+  filter(is.na(DEP_index), disorder == "anxdiag") |>
+  pivot_wider(
+    names_from = c(imputation),
+    values_from = c(prevalence, n)
+  ) |>
+  select(-DEP_index) |> # switch rows to reverse
+  arrange(desc(coding))
+imputation_effect <- as.data.frame(rbind(dep_imp, anx_imp))
 
+# Supplementary Table X
+# Crosstable simple/elaborate
+temp2 <- FH_long |>
+  pivot_wider(
+    names_from = c(coding, imputation, disorder),
+    values_from = c(value)
+  )
+head(temp2)
+table(temp2$simple__depdiag, temp2$elaborate__depdiag, useNA = "always")
+table(temp2$fammember, temp2$simple__depdiag, useNA = "always")
+
+
+# Supplementary Table X - Manually filled, print values here
+# Contrasting short and extended assessment
+# get the number of individuals that don't have count == 0
+FH_long |>
+  filter(coding == "simple", imputation == "", disorder == "depdiag") |>
+  group_by(DEP_index, pident) |>
+  summarise(
+    n = sum(!is.na(value))
+  ) |>
+  count(n != 0)
+
+FH_long |>
+  filter(coding == "elaborate", imputation == "", disorder == "depdiag") |>
+  group_by(DEP_index, pident) |>
+  summarise(
+    n = sum(!is.na(value))
+  ) |>
+  count(n != 0)
 
 # Prevalence in cases versus control
 info |>
@@ -197,24 +242,37 @@ info |>
     values_from = c(prevalence)
   )
 
-# Sample sizes in simple and elaborate
-info |>
-  filter(is.na(DEP_index), disorder == "depdiag", imputation == "") |>
-  select(-imputation, -DEP_index)
-
-info |>
-  filter(is.na(DEP_index), disorder == "anxdiag", imputation == "") |>
-  select(-imputation, -DEP_index)
-
-# Crosstable simple/elaborate
-temp2 <- FH_long |>
-  pivot_wider(
-    names_from = c(coding, imputation, disorder),
-    values_from = c(value)
+# FH+ percentages in cases versus controls
+indicators_PRS_index |>
+  filter(coding == "DEP_simple", indicator == "plusminus") |>
+  group_by(DEP_index) |>
+  summarise(
+    n_plus = sum(value, na.rm = TRUE),
+    n_total = sum(!is.na(value)),
+    percentage = n_plus / n_total
   )
-head(temp2)
-table(temp2$simple__depdiag, temp2$elaborate__depdiag, useNA = "always")
-table(temp2$fammember, temp2$simple__depdiag, useNA = "always")
+
+indicators_PRS_index |>
+  filter(coding == "DEP_elaborate", indicator == "plusminus") |>
+  group_by(DEP_index) |>
+  summarise(
+    n_plus = sum(value, na.rm = TRUE),
+    n_total = sum(!is.na(value)),
+    percentage = n_plus / n_total
+  )
+
+assessment
+
+
+# Correlation PAFGRS and PRS
+indicators_temp <- indicators_PRS_index |>
+  filter(coding == "DEP_simple") |>
+  pivot_wider(names_from = indicator, values_from = value)
+cor.test(indicators_df$PAFGRS, indicators_df$PRS, method = "pearson", use = "pairwise.complete.obs")
+indicators_temp <- indicators_PRS_index |>
+  filter(coding == "DEP_elaborate") |>
+  pivot_wider(names_from = indicator, values_from = value)
+cor.test(indicators_df$PAFGRS, indicators_df$PRS, method = "pearson", use = "pairwise.complete.obs")
 ```
 
 # Descriptives of final sample - Table 1
@@ -321,6 +379,55 @@ both / complete
 ```
 
 
+# Sex- and age-specific prevalences
+```{r}
+K_info
+# reshape to long format
+K_long <- K_info %>%
+  pivot_longer(cols = -ages, names_to = "group", values_to = "value")
+
+# nicer labels for legend
+K_long <- K_long %>%
+  mutate(group_label = recode(group,
+    DEP_female = "Major Depressive Disorder: Female",
+    DEP_male   = "Major Depressive Disorder: Male",
+    ANX_female = "Any Anxiety Disorder: Female",
+    ANX_male   = "Any Anxiety Disorder: Male"
+  ))
+
+# define colors
+cols <- c(
+  "Major Depressive Disorder: Female" = "#3ecae2",
+  "Major Depressive Disorder: Male"   = "#2bb1e6",
+  "Any Anxiety Disorder: Female" = "#d48032",
+  "Any Anxiety Disorder: Male"   = "#c2470e"
+)
+
+# create plot
+prevalence_model <- ggplot(K_long, aes(x = ages, y = value, color = group_label, linetype = group_label)) +
+  geom_line(size = 1.1) +
+  geom_point(size = 2) +
+  scale_color_manual(values = cols) +
+  scale_linetype_manual(values = c("solid", "solid", "dashed", "dashed")) +
+  scale_x_continuous(breaks = K_info$ages) +
+  scale_y_continuous(labels = percent_format(accuracy = 1)) + # show as percentages
+  labs(
+    x = "Age",
+    y = "Cumulative incidence",
+    color = "Group",
+    linetype = "Group"
+  ) +
+  theme_minimal(base_size = 9) +
+  theme(
+    plot.title = element_text(size = 11, face = "bold", hjust = 0.5),
+    legend.position = "right"
+  )
+
+# print plot
+print(prevalence_model)
+
+```
+
 
 # Correlations
 ```{r}
@@ -359,7 +466,7 @@ indicators_DEP_simple <- indicators_PRS_index |>
   pivot_wider(names_from = indicator, values_from = value)
 
 all_indicators <- cbind(indicators_DEP_simple[, 4:8], indicators_ANX_simple[, 4:9]) |>
-  rename("FH+/-" = "plusminus", "Proportion" = "proportion", "PAFGRS+Sex/Age" = "PAFGRSplus", "PAFGRS+Sex/Age/Anx" = "PAFGRSplus+ANX")
+  rename("FH+/-" = "plusminus", "Proportion" = "proportion", "PAFGRS+Sex/Age" = "PAFGRSplus", "PAFGRS+Sex/Age/Anx" = "PAFGRSplus+ANX", "PGS" = "PRS")
 
 glimpse(all_indicators)
 ```
@@ -396,16 +503,16 @@ for (i in 1:ncol(all_indicators)) {
 View(p_values)
 # Note: SE is always 0.026 because it depends only on the sample size
 
-
+cors
 # Display item 3
 cors_df <- cors[
-  c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/Anx", "PRS"),
-  c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/Anx", "PRS")
+  c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/Anx", "PGS"),
+  c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/Anx", "PGS")
 ]
 
 # Draw selected heatmaps
 heatmap_pearson <- draw_heatmap(cors_df,
-  subtitle = "Family History Indicators and PRS",
+  subtitle = "Family History Indicators and PGS",
   title = "Correlations between genetic predictors for depression",
   legend_title = "Pearson's r"
 )
@@ -485,7 +592,7 @@ for (type in all_types) {
     ) +
     scale_fill_manual(
       values = fill_colors, # Colors for groups
-      labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+      labels = c("0" = "Controls", "1" = "Dep.Cases") # Custom labels
     ) +
     my_theme
 
@@ -501,7 +608,7 @@ for (type in all_types) {
     ) +
     scale_fill_manual(
       values = fill_colors, # Colors for groups
-      labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+      labels = c("0" = "Controls", "1" = "Dep.Cases") # Custom labels
     ) +
     my_theme
 
@@ -516,7 +623,7 @@ for (type in all_types) {
     scale_y_continuous(limits = c(0, 3)) +
     scale_fill_manual(
       values = fill_colors, # Colors for groups
-      labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+      labels = c("0" = "Controls", "1" = "Dep.Cases") # Custom labels
     ) +
     my_theme
 
@@ -531,7 +638,7 @@ for (type in all_types) {
     scale_y_continuous(limits = c(0, 3)) +
     scale_fill_manual(
       values = fill_colors, # Colors for groups
-      labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+      labels = c("0" = "Controls", "1" = "Dep.Cases") # Custom labels
     ) +
     my_theme
 
@@ -539,14 +646,14 @@ for (type in all_types) {
     ggplot(aes(x = PRS, fill = DEP_index)) +
     geom_density(position = "identity", adjust = 1.5) +
     labs(
-      x = "PRS",
+      x = "PGS",
       y = "Density",
       fill = "Status of Index"
     ) +
     scale_y_continuous(limits = c(0, 0.5)) +
     scale_fill_manual(
       values = fill_colors, # Colors for groups
-      labels = c("0" = "Controls", "1" = "MDD Cases") # Custom labels
+      labels = c("0" = "Controls", "1" = "Dep.Cases") # Custom labels
     ) +
     my_theme
 
@@ -621,19 +728,20 @@ display_2
 
 ```{r}
 # List of AUC plots
-predictors <- factor(predictors, levels = predictors)
+predictors_supplement <- c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PGS")
+predictors <- factor(predictors_supplement, levels = predictors_supplement)
 AUC_plots <- list()
 for (type in types) {
   AUC_df <- assessment[[type]] |>
     t() |>
     as.data.frame() |>
     rename(AUC = AUC, SE = AUC.SE)
-  AUC_plots[[type]] <- plot_AUC(AUC_df, groups = predictors, title = type)
+  AUC_plots[[type]] <- plot_AUC(AUC_df, groups = predictors)
 }
 AUC_plots
 
 # With Anxiety as helper trait
-predictors_ANX <- c("plusminus+ANX", "proportion+ANX", "FLS+ANX", "PAFGRS+ANX", "PAFGRSplus+ANX", "PRS")
+predictors_ANX <- c("plusminus+ANX", "proportion+ANX", "FLS+ANX", "PAFGRS+ANX", "PAFGRSplus+ANX", "PGS")
 # List of AUC plots
 predictors_ANX <- factor(predictors_ANX, levels = predictors_ANX)
 AUC_plots_ANX <- list()
@@ -646,8 +754,12 @@ for (type in types_ANX) {
 }
 AUC_plots_ANX
 
-assessment_assembly <- (AUC_plots$DEP_simple + AUC_plots$DEP_elaborate + plot_spacer()) / (AUC_plots$DEP_simple_0imputed + AUC_plots$DEP_elaborate_0imputed + AUC_plots$DEP_2020paper) +
-  plot_annotation("Prediction of depression in NESDA") & theme(plot.title = element_text(size = 16))
+# Supplemental Figure: AUC plots assembly
+plot1 <- AUC_plots$DEP_simple + ggtitle("Short assessment")
+plot2 <- AUC_plots$DEP_elaborate + ggtitle("Extended assessment")
+plot3 <- AUC_plots$DEP_simple_0imputed + ggtitle("Short assessment + Imputation")
+plot4 <- AUC_plots$DEP_elaborate_0imputed + ggtitle("Extended assessment + Imputation")
+assessment_assembly <- (plot1 + plot2) / (plot3 + plot4)
 assessment_assembly
 ```
 
@@ -655,15 +767,15 @@ assessment_assembly
 # Display item 4
 assessment_display4
 
-predictors_4 <- c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/ANX", "PRS", "PAFGRS+Sex/Age/ANX\n& PRS\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0\u00A0")
-predictors_4 <- factor(predictors_4, levels = predictors_4)
-predictors_4
+predictors_4a <- c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/ANX", "PGS", "PAFGRS+Sex/Age/ANX\n& PGS")
+predictors_4a <- factor(predictors_4a, levels = predictors_4a)
+predictors_4a
 
 display_4 <- ggplot(data = assessment_display4[1:8, ]) +
-  aes(x = predictors_4, y = AUC) +
-  geom_errorbar(aes(x = predictors_4, ymin = AUC - SE, ymax = AUC + SE), colour = "#35A0ABFF", width = .2, position = position_nudge(0), size = 1) +
+  aes(x = predictors_4a, y = AUC) +
+  geom_errorbar(aes(x = predictors_4a, ymin = AUC - SE, ymax = AUC + SE), colour = "#35A0ABFF", width = .2, position = position_nudge(0), size = 1) +
   geom_point(colour = "#35A0ABFF", size = 9 / .pt, shape = 18, position = position_nudge(0)) +
-  ylim(0.55, 0.75) +
+  ylim(0.50, 0.75) +
   ylab("AUC") +
   xlab("") +
   theme_minimal() +
@@ -675,6 +787,30 @@ display_4 <- ggplot(data = assessment_display4[1:8, ]) +
 display_4
 ```
 
+
+```{r }
+# Display item 4b
+results_df_scaled
+
+predictors_4b <- c("FH+/-", "Proportion", "FLS", "PAFGRS", "PAFGRS+Sex/Age", "PAFGRS+Sex/Age/ANX", "PGS", "PAFGRS+Sex/Age/ANX\nwith PGS", "PGS \nwith PAFGRS+Sex/Age/ANX")
+predictors_4b <- factor(predictors_4b, levels = predictors_4b)
+predictors_4b
+
+display_4b <- ggplot(data = results_df_scaled[1:9, ]) +
+  aes(x = predictors_4b, y = OR) +
+  geom_errorbar(aes(x = predictors_4b, ymin = ci_lower, ymax = ci_upper), colour = "#35A0ABFF", width = .2, position = position_nudge(0), size = 1) +
+  geom_point(colour = "#35A0ABFF", size = 9 / .pt, shape = 18, position = position_nudge(0)) +
+  ylim(1, 3) +
+  ylab("Odds Ratio (per SD increase)") +
+  xlab("") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 45, size = 9, vjust = 1, hjust = 1),
+    axis.text.y = element_text(size = 9)
+  )
+display_4b
+```
 
 # OR plot
 
@@ -690,49 +826,6 @@ df <- PGS_PAFGRS_df
 variable <- "PRS" # Change to "PAFGRS" for PAFGRS analysis
 num_quantiles <- 5 # Number of quantiles to create
 
-logistic_regression_quantiles <- function(df, variable, num_quantiles = 5) {
-  # Create quantiles for the variable
-  df <- df %>%
-    mutate(quantile = ntile(get(variable), num_quantiles))
-  head(df)
-  # Info on case/control counts per quantile
-  counts <- df |>
-    group_by(quantile) |>
-    summarise(
-      case_nr = sum(DEP_index == 1),
-      control_nr = sum(DEP_index == 0)
-    )
-
-  # Dependent variable
-  # Fit logistic regression for each quantile
-  model <- glm(DEP_index ~ factor(quantile), family = binomial(link = "logit"), data = df)
-
-  # Extract odds ratios and 95% confidence intervals
-  coefs <- summary(model)$coefficients
-  odds_ratios <- exp(coefs[, 1]) # Convert coefficients to odds ratios
-  ci_lower <- exp(coefs[, 1] - 1.96 * coefs[, 2]) # Lower bound of CI
-  ci_upper <- exp(coefs[, 1] + 1.96 * coefs[, 2]) # Upper bound of CI
-
-  # Create a tidy data frame with quantiles and odds ratios (reference level is quantile 1)
-  result <- data.frame(
-    variable = variable, # Name of the variable (PGS or PAFGRS)
-    quantile = 1:length(odds_ratios), # Quantile numbers
-    se = coefs[, 2], # Standard errors
-    odds_ratio = odds_ratios, # Odds ratios
-    ci_lower = ci_lower, # Lower CI
-    ci_upper = ci_upper, # Upper CI
-    case_nr = counts$case_nr, # Number of cases in each quantile
-    control_nr = counts$control_nr # Number of controls in each quantile
-  )
-
-  # Set odds ratio for quantile 1 to 1 (reference category)
-  result$odds_ratio[1] <- 1
-  result$ci_lower[1] <- 1
-  result$ci_upper[1] <- 1
-
-  return(result)
-}
-
 ## Plot: Display item 4b
 pgs_results_quantiles <- logistic_regression_quantiles(PGS_PAFGRS_df, "PRS", num_quantiles = 5) # You can change the num_quantiles to your desired value
 pafgrs_results_quantiles <- logistic_regression_quantiles(PGS_PAFGRS_df, "PAFGRSplus", num_quantiles = 5)
@@ -745,7 +838,7 @@ quantile_details <- cbind(pgs_results_quantiles$quantile, pafgrs_results_quantil
 combined_results_quantiles <- bind_rows(pgs_results_quantiles, pafgrs_results_quantiles)
 combined_results_quantiles
 
-display_4b <- ggplot(combined_results_quantiles) +
+display_4c <- ggplot(combined_results_quantiles) +
   aes(x = quantile, y = odds_ratio, color = variable) +
   geom_point(size = 9 / .pt, shape = 18, position = position_dodge(0.22)) + # Dodge points horizontally
   geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), width = 0.2, position = position_dodge(0.22), size = 1) + # Thicker error bars
@@ -754,7 +847,7 @@ display_4b <- ggplot(combined_results_quantiles) +
   ) +
   scale_color_manual(
     values = c("PRS" = "#3A2C59FF", "PAFGRSplus" = "#5ACCADFF"),
-    labels = c("PRS" = "PRS", "PAFGRSplus" = "PAFGRS+Sex/Age/ANX")
+    labels = c("PRS" = "PGS", "PAFGRSplus" = "PAFGRS+Sex/Age/ANX")
   ) +
   theme_minimal() +
   theme(
@@ -763,7 +856,7 @@ display_4b <- ggplot(combined_results_quantiles) +
     legend.text = element_text(size = 9),
     legend.title = element_text(size = 9)
   )
-display_4b
+display_4c
 ```
 
 # Save figures and tables
@@ -772,11 +865,15 @@ display_4b
 write.csv(table_1, file = here("Results", "Table_1.csv"), row.names = TRUE)
 ggsave(here("Results", "Figure3.pdf"), heatmap_pearson, width = 21, height = 12.7, units = "cm")
 ggsave(here("Results", "Figure2.pdf"), display_2, width = 21, height = 12.7, units = "cm")
-ggsave(here("Results", "Figure4.pdf"), display_4, width = 21, height = 12.7, units = "cm")
+ggsave(here("Results", "Figure4a.pdf"), display_4, width = 21, height = 12.7, units = "cm")
 ggsave(here("Results", "Figure4b.pdf"), display_4b, width = 21, height = 12.7, units = "cm")
+ggsave(here("Results", "Figure4c.pdf"), display_4c, width = 21, height = 12.7, units = "cm")
 
 # Supplement
-ggsave(here("Results", "NESDA_cor_heatmap_spearman.pdf"), heatmap_spearman, width = 21, height = 12.7, units = "cm")
+ggsave(here("Results", "cor_heatmap_spearman.pdf"), heatmap_spearman, width = 21, height = 12.7, units = "cm")
+ggsave(here("Results", "Supplemental_Figure_AUC_assessment.pdf"), assessment_assembly, width = 21, height = 16, units = "cm")
 write.csv(quantile_details, file = here("Results", "quantile_details.csv"), row.names = FALSE)
-
+ggsave(here("Results", "Age-sex-specific_prevalences.pdf"), prevalence_model, width = 21, height = 12.7, units = "cm")
+write.csv(gain_in_index, file = here("Results", "gain_in_index.csv"), row.names = TRUE)
+write.csv(imputation_effect, file = here("Results", "imputation_effect.csv"), row.names = TRUE)
 ```

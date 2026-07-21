@@ -1,8 +1,17 @@
+# 
+# 1) Simulates families with different structures and disorders
+# 2) Computes different family history based predictors (FH+, FH proportion, LT-FH) from the simulated data
+# 3) Evaluates prediction accuracy (AUC, r2l) of the different predictors
+# Input: Scripts/setup.R, Scripts/indicator_functions.R
+# Output: Results/outcome_check_denseprop.RData, Results/r2_DEP_famsizes.pdf, Results/r2_DEP_disorders.pdf, Results/AUC_DEP_5fam_3ind.pdf
+# Status: DEBUG (problem with simulate_FH function)
+
 #### Preparing the environment ####
 rm(list=ls())
 
 # Setup - packages and functions
 source(file = "Scripts/setup.R")
+source(file = "Scripts/indicator_functions.R")
 
 # # Build the family
 # num_sibs <- 2 # number of siblings to simulate
@@ -208,8 +217,6 @@ r2_plot_disorders <- ggplot() +
 
 r2_plot_disorders
 ggsave(here("Results", "r2_DEP_disorders.pdf"), r2_plot_disorders)
-
-
 
 
 

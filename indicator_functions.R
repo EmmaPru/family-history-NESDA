@@ -1,3 +1,13 @@
+# This script
+# 1) sources setup.R to load packages and parameters
+# 2) loads additionally required packages
+# 3) defines functions to calculate individual family history indicators: FH+/-, Proportion, PAFGRS, FLS, score_FH (wrapper function)
+# Input: setup.R
+# Output: functions
+# Status: Functional. Tested by test_indicator_functions.R
+
+source("Scripts/setup.R")
+
 # Load packages
 # packages in alphabetical order
 packages <- c("stringr", "testit")
@@ -13,7 +23,7 @@ package.check <- lapply(
   }
 )
 
-source("Scripts/setup.R")
+
 
 # The general idea of the individual indicator functions is that they take as main input data one row containing all relevant diagnoses (may be one or multiple disorders)
 # So there usually need to be some input preparation steps before-hand, isolating the relevant columns
@@ -367,3 +377,54 @@ score_FH <- function(FH_dataframe, methods = c("plusminus", "proportion", "propo
 
   return(indicators)
 }
+
+
+# #### FH indicators ####
+# disorders_example = c("DEP")
+# index_disorder_example = c("DEP")
+# Ks_example = c(DEP = 0.2)
+# h2l_example = c(DEP = 0.4)
+# K_relative_example = c(DEP = 0.5)
+# K_sporadic_example = c(DEP = 0.134)
+# AO_lower_example = c(DEP = 5)
+# AO_upper_example = c(DEP = 65)
+#
+# FH_example <- as.data.frame(rbind(c(1, 1),
+#                           c(0, 0)))
+# colnames(FH_example) <- c("sib1_DEP", "sib2_DEP")
+# FH_example <- transform(FH_example, sib1_DEP = as.numeric(sib1_DEP),
+#                 sib2_DEP = as.numeric(sib2_DEP))
+#
+# ages_example <- as.data.frame(rbind(c(sib1_age = NA, sib2_age = NA),
+#                             c(sib1_age = 15, sib2_age = 20)))
+# colnames(ages_example) <- c("sib1", "sib2")
+#
+# sexes_example <- as.data.frame(rbind(c(sib1_sex = "F", sib2_sex = "F"),
+#                             c(sib1_sex = "F", sib2_age = "F")))
+# colnames(sexes_example) <- c("sib1", "sib2")
+#
+# # note. what I am not doing is taking into account age and sex of the index individual.
+# # pafgrs doesn't explicitly allow this. so not sure how to implement it.
+#
+# # note on formats.
+# # for those indicator functions that are used on the dataframe with the help of apply functions, the FH input will be a named vector
+# # for those indicator functions that are used on df with for loop, the FH input will be a one row dataframe with column names
+# # both seem to work now, so input assertions should allow either
+#
+# # Individual use.
+# score_FH(FH_dataframe = FH_example, methods = c("plusminus"), disorders = c("DEP"))
+# score_FH(FH_dataframe = FH_example, methods = c("proportion"), family_sizes = c(2, 2), disorders = c("DEP"))
+# score_FH(FH_dataframe = FH_example, methods = c("proportion_dense"), family_sizes = c(2, 2), disorders = c("DEP"))
+# score_FH(FH_dataframe = FH_example, methods = c("PAFGRS"), Ks = Ks_example, h2ls = h2l_example, rgs = rg_SCZ.BIP.DEP.ANX, index_disorder = c("DEP"))
+# score_FH(FH_dataframe = FH_example, methods = c("PAFGRSplus"), Ks = Ks_example, h2ls = h2l_example, rgs = rg_SCZ.BIP.DEP.ANX, index_disorder = c("DEP"), sexes = sexes_example, ages = ages_example)
+# score_FH(FH_dataframe = FH_example, methods = c("FLS"), K_relative = K_relative_example, K_sporadic = K_sporadic_example, AO_lower = AO_lower_example, AO_upper = AO_upper_example, ages = ages_example, disorder_FLS = "DEP")
+#
+# # All together <:-p
+# score_FH(FH_dataframe = FH_example, methods = c("plusminus", "proportion", "proportion_dense", "FLS", "PAFGRS", "PAFGRSplus"), disorders = c("DEP"), family_sizes = c(2, 2), ages = ages_example,
+#          sexes = sexes_example, Ks = Ks_example, h2ls = h2l_example, rgs = rg_SCZ.BIP.DEP.ANX, threshold_list = disorder_thresholds,
+#          K_relative = K_relative_example, K_sporadic = K_sporadic_example, AO_lower = AO_lower_example, AO_upper = AO_upper_example, disorder_FLS = "DEP", index_disorder = "DEP")
+#
+# # Problem: FLS gives 0 when 2 sibs are affected. that seems wrong. but it isn't wrong. because ages for this sib pair are NA so LR is NA.
+# # this is correct behaviour but is it what we need?
+#
+#

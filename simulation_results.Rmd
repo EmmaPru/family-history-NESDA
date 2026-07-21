@@ -4,6 +4,15 @@ output: html_document
 date: "2024-04-05"
 ---
 
+This script
+1) Simulates families with different structures and disorders and assesses their prediction by family history indicators
+2) Compares proportion vs. dense proportion family history indicators
+3) Assesses prediction accuracy (AUC) for depression, schizophrenia and bipolar disorder
+4) Checks if PA-FGRS gives the same results as LT-FH
+Input: Scripts/setup.R, Scripts/indicator_functions.R
+Output: Results/AUC_DEP_denseprop.pdf, Results/AUC_SCZ.pdf, Results/AUC_BIP.pdf, Results/bip_prediction_output.RData, Results/scz_prediction_output.RData, Results/dep_prediction_denseprop.RData
+Status: DEBUG (problem with full_sim function)
+
 ```{r setup, include=FALSE}
 # Setup - packages and functions
 source(file = "setup.R")
